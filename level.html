@@ -1,0 +1,139 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0c0d10">
+    <meta name="description" content="View a Geometry Dash level's HLL ranking, details, and verified player completions.">
+    <title>Level Details — HLL</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="script.js" defer></script>
+</head>
+<body>
+    <header class="site-header">
+        <a class="brand" href="index.html" aria-label="HLL Home">
+            <span class="brand-mark">HLL</span>
+            <span class="brand-name">HARDEST LEVELS LIST</span>
+        </a>
+
+        <nav class="main-nav" aria-label="Main navigation">
+            <a class="nav-link" href="index.html">Home</a>
+            <a class="nav-link" href="main-list.html">Main List</a>
+            <a class="nav-link" href="extended-list.html">Extended</a>
+            <a class="nav-link" href="players.html">Players</a>
+        </nav>
+
+        <a class="login-button" href="login.html">Log In</a>
+    </header>
+
+    <main>
+        <section class="hero">
+            <p class="eyebrow" id="level-list-type">HLL LEVEL DETAILS</p>
+            <h1 id="level-title">LEVEL <span>DETAILS.</span></h1>
+            <p class="hero-description" id="level-description">
+                Ranking information and level details will appear here
+                when a level is selected.
+            </p>
+
+            <div class="hero-actions">
+                <a class="button button-primary" href="login.html">
+                    Submit Completion
+                </a>
+                <a class="button button-secondary" href="main-list.html">
+                    Back to Main List
+                </a>
+            </div>
+
+            <div class="stats">
+                <div class="stat">
+                    <span class="stat-number" id="level-rank">—</span>
+                    <span class="stat-label">HLL Rank</span>
+                </div>
+
+                <div class="stat">
+                    <span class="stat-number" id="level-points">—</span>
+                    <span class="stat-label">Points Available</span>
+                </div>
+
+                <div class="stat">
+                    <span class="stat-number" id="level-completion-count">0</span>
+                    <span class="stat-label">Verified Completions</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="list-section">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">LEVEL INFORMATION</p>
+                    <h2>Details</h2>
+                </div>
+            </div>
+
+            <div class="ranking-list">
+                <div class="placeholder-card">
+                    <span class="placeholder-number">01</span>
+                    <div>
+                        <h3>Level name</h3>
+                        <p id="level-detail-name">Waiting for level data.</p>
+                    </div>
+                </div>
+
+                <div class="placeholder-card">
+                    <span class="placeholder-number">02</span>
+                    <div>
+                        <h3>Creator</h3>
+                        <p id="level-creator">Not available yet.</p>
+                    </div>
+                </div>
+
+                <div class="placeholder-card">
+                    <span class="placeholder-number">03</span>
+                    <div>
+                        <h3>Geometry Dash Level ID</h3>
+                        <p id="level-id">Not available yet.</p>
+                    </div>
+                </div>
+
+                <div class="placeholder-card">
+                    <span class="placeholder-number">04</span>
+                    <div>
+                        <h3>Ranking status</h3>
+                        <p id="level-status">
+                            Level information has not been loaded.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="list-section">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">PLAYER PROGRESS</p>
+                    <h2>Verified Completions</h2>
+                </div>
+            </div>
+
+            <div class="ranking-list" id="level-completions">
+                <div class="empty-state">
+                    <h3>No completion records yet</h3>
+                    <p>
+                        Approved completion records will appear here
+                        once players submit evidence and staff verify it.
+                    </p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <a class="footer-brand" href="index.html">HLL</a>
+        <p>Hardest Levels List</p>
+        <p class="footer-note">
+            Independent community rankings. Staff-reviewed submissions.
+        </p>
+    </footer>
+</body>
+</html>

@@ -1,0 +1,162 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0c0d10">
+    <meta name="description" content="Manage your HLL account and player profile settings.">
+    <title>Account Settings — HLL</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="script.js" defer></script>
+</head>
+<body>
+    <header class="site-header">
+        <a class="brand" href="index.html" aria-label="HLL Home">
+            <span class="brand-mark">HLL</span>
+            <span class="brand-name">HARDEST LEVELS LIST</span>
+        </a>
+
+        <nav class="main-nav" aria-label="Main navigation">
+            <a class="nav-link" href="index.html">Home</a>
+            <a class="nav-link" href="main-list.html">Main List</a>
+            <a class="nav-link" href="extended-list.html">Extended</a>
+            <a class="nav-link" href="players.html">Players</a>
+        </nav>
+
+        <a class="login-button" href="profile.html">My Profile</a>
+    </header>
+
+    <main class="auth-page">
+        <section class="auth-card submit-card">
+            <a class="auth-back" href="profile.html">← Back to Profile</a>
+
+            <p class="eyebrow">ACCOUNT MANAGEMENT</p>
+            <h1>Your <span>settings.</span></h1>
+
+            <p class="auth-description">
+                Customize your public profile and manage your account.
+            </p>
+
+            <form id="profile-settings-form">
+                <div class="form-field">
+                    <label for="settings-username">Public username</label>
+                    <input
+                        type="text"
+                        id="settings-username"
+                        name="username"
+                        placeholder="Your HLL username"
+                        minlength="3"
+                        maxlength="24"
+                        autocomplete="nickname"
+                        required
+                    >
+                    <p class="field-hint">
+                        Your username identifies you on the leaderboard.
+                    </p>
+                </div>
+
+                <div class="form-field">
+                    <label for="settings-bio">Profile bio</label>
+                    <textarea
+                        id="settings-bio"
+                        name="bio"
+                        rows="4"
+                        maxlength="300"
+                        placeholder="Tell the HLL community about yourself..."
+                    ></textarea>
+                </div>
+
+                <div class="form-field">
+                    <label for="settings-gd-username">Geometry Dash username</label>
+                    <input
+                        type="text"
+                        id="settings-gd-username"
+                        name="gd_username"
+                        maxlength="100"
+                        placeholder="Your in-game username"
+                    >
+                </div>
+
+                <div class="form-field">
+                    <label for="settings-avatar">Avatar image URL (optional)</label>
+                    <input
+                        type="url"
+                        id="settings-avatar"
+                        name="avatar_url"
+                        maxlength="1000"
+                        placeholder="https://..."
+                    >
+                    <p class="field-hint">
+                        Use an image URL you control or have permission to use.
+                    </p>
+                </div>
+
+                <button
+                    class="button button-primary auth-submit"
+                    type="submit"
+                >
+                    Save Profile
+                </button>
+
+                <p
+                    class="form-message"
+                    id="settings-message"
+                    role="status"
+                    aria-live="polite"
+                ></p>
+            </form>
+
+            <div class="settings-divider"></div>
+
+            <div class="settings-group">
+                <h2>Account security</h2>
+                <p>
+                    Password changes and account recovery will be handled
+                    through Supabase authentication.
+                </p>
+
+                <button
+                    class="button button-secondary auth-submit"
+                    type="button"
+                    id="password-reset-button"
+                >
+                    Request Password Reset
+                </button>
+
+                <p
+                    class="form-message"
+                    id="password-reset-message"
+                    role="status"
+                    aria-live="polite"
+                ></p>
+            </div>
+
+            <div class="settings-divider"></div>
+
+            <div class="settings-group">
+                <h2>Sign out</h2>
+                <p>
+                    Sign out of your HLL account on this device.
+                </p>
+
+                <button
+                    class="button button-secondary auth-submit"
+                    type="button"
+                    id="logout-button"
+                >
+                    Log Out
+                </button>
+            </div>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <a class="footer-brand" href="index.html">HLL</a>
+        <p>Hardest Levels List</p>
+        <p class="footer-note">
+            Independent community rankings. Staff-reviewed submissions.
+        </p>
+    </footer>
+</body>
+</html>

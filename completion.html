@@ -1,0 +1,136 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0c0d10">
+    <meta name="description" content="Submit Geometry Dash completion evidence for HLL staff verification.">
+    <title>Submit Completion — HLL</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="script.js" defer></script>
+</head>
+<body>
+    <header class="site-header">
+        <a class="brand" href="index.html" aria-label="HLL Home">
+            <span class="brand-mark">HLL</span>
+            <span class="brand-name">HARDEST LEVELS LIST</span>
+        </a>
+
+        <nav class="main-nav" aria-label="Main navigation">
+            <a class="nav-link" href="index.html">Home</a>
+            <a class="nav-link" href="main-list.html">Main List</a>
+            <a class="nav-link" href="extended-list.html">Extended</a>
+            <a class="nav-link" href="players.html">Players</a>
+        </nav>
+
+        <a class="login-button" href="login.html">Log In</a>
+    </header>
+
+    <main class="auth-page">
+        <section class="auth-card submit-card">
+            <a class="auth-back" href="players.html">← Back to Players</a>
+
+            <p class="eyebrow">PLAYER PROGRESSION</p>
+            <h1>Submit <span>proof.</span></h1>
+
+            <p class="auth-description">
+                Submit your completion evidence for a ranked level.
+                Points are awarded only after staff approval.
+            </p>
+
+            <form id="completion-form">
+                <div class="form-field">
+                    <label for="completion-level">HLL level</label>
+                    <input
+                        type="text"
+                        id="completion-level"
+                        name="level_reference"
+                        placeholder="Enter the level name or HLL rank"
+                        maxlength="150"
+                        required
+                    >
+                    <p class="field-hint">
+                        Example: a level name or rank such as #25.
+                    </p>
+                </div>
+
+                <div class="form-field">
+                    <label for="gd-username">Geometry Dash username</label>
+                    <input
+                        type="text"
+                        id="gd-username"
+                        name="gd_username"
+                        placeholder="Your in-game username"
+                        maxlength="100"
+                        required
+                    >
+                </div>
+
+                <div class="form-field">
+                    <label for="evidence-url">Evidence link</label>
+                    <input
+                        type="url"
+                        id="evidence-url"
+                        name="evidence_url"
+                        placeholder="https://..."
+                        maxlength="1000"
+                        required
+                    >
+                    <p class="field-hint">
+                        Provide a video or other accessible evidence
+                        that staff can review.
+                    </p>
+                </div>
+
+                <div class="form-field">
+                    <label for="completion-notes">Additional information (optional)</label>
+                    <textarea
+                        id="completion-notes"
+                        name="notes"
+                        rows="4"
+                        maxlength="1500"
+                        placeholder="Add any details that may help with verification..."
+                    ></textarea>
+                </div>
+
+                <label class="form-checkbox">
+                    <input type="checkbox" id="completion-confirm" required>
+                    <span>
+                        I confirm this is my own completion and that the
+                        evidence accurately represents my achievement.
+                    </span>
+                </label>
+
+                <button
+                    class="button button-primary auth-submit"
+                    type="submit"
+                >
+                    Submit for Verification
+                </button>
+
+                <p
+                    class="form-message"
+                    id="completion-message"
+                    role="status"
+                    aria-live="polite"
+                ></p>
+            </form>
+
+            <p class="auth-terms">
+                Submitting evidence does not guarantee approval.
+                Duplicate submissions for the same player and level
+                will not award additional points.
+            </p>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <a class="footer-brand" href="index.html">HLL</a>
+        <p>Hardest Levels List</p>
+        <p class="footer-note">
+            Independent community rankings. Staff-reviewed submissions.
+        </p>
+    </footer>
+</body>
+</html>

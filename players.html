@@ -1,0 +1,123 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0c0d10">
+    <meta name="description" content="View the HLL Geometry Dash player leaderboard and rankings.">
+    <title>Players — HLL</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="script.js" defer></script>
+</head>
+<body>
+    <header class="site-header">
+        <a class="brand" href="index.html" aria-label="HLL Home">
+            <span class="brand-mark">HLL</span>
+            <span class="brand-name">HARDEST LEVELS LIST</span>
+        </a>
+
+        <nav class="main-nav" aria-label="Main navigation">
+            <a class="nav-link" href="index.html">Home</a>
+            <a class="nav-link" href="main-list.html">Main List</a>
+            <a class="nav-link" href="extended-list.html">Extended</a>
+            <a class="nav-link active" href="players.html">Players</a>
+        </nav>
+
+        <a class="login-button" href="login.html">Log In</a>
+    </header>
+
+    <main>
+        <section class="hero">
+            <p class="eyebrow">THE HLL COMMUNITY</p>
+            <h1>PLAYER <span>RANKINGS.</span></h1>
+            <p class="hero-description">
+                Prove your skill, submit your completions,
+                and climb the HLL leaderboard.
+            </p>
+
+            <div class="hero-actions">
+                <a class="button button-primary" href="login.html">
+                    Join HLL
+                </a>
+                <a class="button button-secondary" href="main-list.html">
+                    Explore Levels
+                </a>
+            </div>
+
+            <div class="stats">
+                <div class="stat">
+                    <span class="stat-number">—</span>
+                    <span class="stat-label">Ranked players</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-number">350</span>
+                    <span class="stat-label">Ranked levels</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-number">Verified</span>
+                    <span class="stat-label">Completions count</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="list-section">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">COMMUNITY LEADERBOARD</p>
+                    <h2>Top Players</h2>
+                </div>
+                <span class="section-tag">POINTS</span>
+            </div>
+
+            <label for="player-search" class="search-label">
+                Search players
+            </label>
+
+            <input
+                type="search"
+                id="player-search"
+                class="search-input"
+                placeholder="Search by player username..."
+                autocomplete="off"
+            >
+
+            <p class="list-notice" id="player-count" aria-live="polite">
+                Player rankings will appear here once verified completions
+                have been recorded.
+            </p>
+
+            <div class="ranking-list" id="player-list">
+                <div class="empty-state">
+                    <h3>The leaderboard is waiting for its first players</h3>
+                    <p>
+                        Create an account, submit completion evidence,
+                        and earn points after staff verification.
+                    </p>
+                    <a class="button button-primary" href="login.html">
+                        Get Started
+                    </a>
+                </div>
+            </div>
+        </section>
+
+        <section class="submit-section">
+            <p class="eyebrow">HOW POINTS WORK</p>
+            <h2>Every verified completion counts.</h2>
+            <p>
+                Main List and Extended List levels award points according
+                to their rank. Each level can award points to a player
+                only once, and staff must verify the completion first.
+            </p>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <a class="footer-brand" href="index.html">HLL</a>
+        <p>Hardest Levels List</p>
+        <p class="footer-note">
+            Independent community rankings. Staff-reviewed submissions.
+        </p>
+    </footer>
+</body>
+</html>

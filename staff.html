@@ -1,0 +1,164 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0c0d10">
+    <meta name="description" content="HLL staff moderation dashboard.">
+    <title>Staff Dashboard — HLL</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="script.js" defer></script>
+</head>
+<body>
+    <header class="site-header">
+        <a class="brand" href="index.html" aria-label="HLL Home">
+            <span class="brand-mark">HLL</span>
+            <span class="brand-name">HARDEST LEVELS LIST</span>
+        </a>
+
+        <nav class="main-nav" aria-label="Main navigation">
+            <a class="nav-link" href="index.html">Home</a>
+            <a class="nav-link" href="main-list.html">Main List</a>
+            <a class="nav-link" href="extended-list.html">Extended</a>
+            <a class="nav-link" href="players.html">Players</a>
+        </nav>
+
+        <a class="login-button" href="login.html">Account</a>
+    </header>
+
+    <main>
+        <section class="hero">
+            <p class="eyebrow">HLL ADMINISTRATION</p>
+            <h1>STAFF <span>DASHBOARD.</span></h1>
+            <p class="hero-description">
+                Review community submissions, verify completions,
+                and maintain the integrity of the rankings.
+            </p>
+
+            <div class="hero-actions">
+                <a class="button button-primary" href="#level-queue">
+                    Review Levels
+                </a>
+                <a class="button button-secondary" href="#completion-queue">
+                    Review Completions
+                </a>
+            </div>
+
+            <div class="stats">
+                <div class="stat">
+                    <span class="stat-number" id="pending-level-count">—</span>
+                    <span class="stat-label">Pending Levels</span>
+                </div>
+
+                <div class="stat">
+                    <span class="stat-number" id="pending-completion-count">—</span>
+                    <span class="stat-label">Pending Completions</span>
+                </div>
+
+                <div class="stat">
+                    <span class="stat-number" id="staff-status">Offline</span>
+                    <span class="stat-label">Dashboard Status</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="list-section" id="level-queue">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">MODERATION QUEUE</p>
+                    <h2>Level Submissions</h2>
+                </div>
+                <span class="section-tag">REVIEW</span>
+            </div>
+
+            <div class="ranking-list" id="staff-level-queue">
+                <div class="empty-state">
+                    <h3>Level queue not connected</h3>
+                    <p>
+                        Once the database is connected, pending level
+                        suggestions will appear here for staff review.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <section class="list-section" id="completion-queue">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">VERIFICATION QUEUE</p>
+                    <h2>Completion Evidence</h2>
+                </div>
+                <span class="section-tag">VERIFY</span>
+            </div>
+
+            <div class="ranking-list" id="staff-completion-queue">
+                <div class="empty-state">
+                    <h3>Verification queue not connected</h3>
+                    <p>
+                        Player evidence will appear here after submission.
+                        Staff approval will determine whether points are awarded.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <section class="list-section" id="ranking-management">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">LIST ADMINISTRATION</p>
+                    <h2>Ranking Management</h2>
+                </div>
+            </div>
+
+            <div class="ranking-list">
+                <a class="placeholder-card" href="main-list.html">
+                    <span class="placeholder-number">01</span>
+                    <div>
+                        <h3>Main List</h3>
+                        <p>Manage rankings #1–#150.</p>
+                    </div>
+                </a>
+
+                <a class="placeholder-card" href="extended-list.html">
+                    <span class="placeholder-number">02</span>
+                    <div>
+                        <h3>Extended List</h3>
+                        <p>Manage rankings #151–#350.</p>
+                    </div>
+                </a>
+
+                <a class="placeholder-card" href="players.html">
+                    <span class="placeholder-number">03</span>
+                    <div>
+                        <h3>Players Leaderboard</h3>
+                        <p>Review player standings and earned points.</p>
+                    </div>
+                </a>
+            </div>
+        </section>
+
+        <section class="submit-section">
+            <p class="eyebrow">SECURITY</p>
+            <h2>Staff access must be verified.</h2>
+            <p>
+                This page is currently a visual layout, not a secure admin
+                system. Before launch, staff permissions must be enforced
+                by Supabase Row Level Security and trusted database policies.
+                Hiding this page from regular users is not sufficient.
+            </p>
+            <a class="button button-secondary" href="login.html">
+                Go to Account
+            </a>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <a class="footer-brand" href="index.html">HLL</a>
+        <p>Hardest Levels List</p>
+        <p class="footer-note">
+            Independent community rankings. Staff-reviewed submissions.
+        </p>
+    </footer>
+</body>
+</html>

@@ -1,0 +1,149 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0c0d10">
+    <meta name="description" content="Submit a Geometry Dash level for review by the HLL ranking staff.">
+    <title>Submit a Level — HLL</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="script.js" defer></script>
+</head>
+<body>
+    <header class="site-header">
+        <a class="brand" href="index.html" aria-label="HLL Home">
+            <span class="brand-mark">HLL</span>
+            <span class="brand-name">HARDEST LEVELS LIST</span>
+        </a>
+
+        <nav class="main-nav" aria-label="Main navigation">
+            <a class="nav-link" href="index.html">Home</a>
+            <a class="nav-link" href="main-list.html">Main List</a>
+            <a class="nav-link" href="extended-list.html">Extended</a>
+            <a class="nav-link" href="players.html">Players</a>
+        </nav>
+
+        <a class="login-button" href="login.html">Log In</a>
+    </header>
+
+    <main class="auth-page">
+        <section class="auth-card submit-card">
+            <a class="auth-back" href="index.html">← Back to HLL</a>
+
+            <p class="eyebrow">COMMUNITY SUBMISSIONS</p>
+            <h1>Submit a <span>level.</span></h1>
+
+            <p class="auth-description">
+                Know a level that deserves to be ranked?
+                Send it to the HLL team for review.
+            </p>
+
+            <form id="level-submit-form">
+                <div class="form-field">
+                    <label for="level-name">Level name</label>
+                    <input
+                        type="text"
+                        id="level-name"
+                        name="level_name"
+                        placeholder="Enter the level's name"
+                        maxlength="100"
+                        required
+                    >
+                </div>
+
+                <div class="form-field">
+                    <label for="level-id">Geometry Dash level ID</label>
+                    <input
+                        type="text"
+                        id="level-id"
+                        name="level_id"
+                        placeholder="Enter the numeric level ID"
+                        inputmode="numeric"
+                        pattern="[0-9]+"
+                        maxlength="20"
+                        required
+                    >
+                    <p class="field-hint">
+                        The ID helps staff identify the exact level.
+                    </p>
+                </div>
+
+                <div class="form-field">
+                    <label for="level-creator">Level creator</label>
+                    <input
+                        type="text"
+                        id="level-creator"
+                        name="creator"
+                        placeholder="Creator's username"
+                        maxlength="100"
+                        required
+                    >
+                </div>
+
+                <div class="form-field">
+                    <label for="suggested-list">Suggested placement</label>
+                    <select
+                        id="suggested-list"
+                        name="suggested_list"
+                        required
+                    >
+                        <option value="">Choose a list</option>
+                        <option value="main">Main List (#1–#150)</option>
+                        <option value="extended">Extended List (#151–#350)</option>
+                        <option value="either">Either list</option>
+                    </select>
+                </div>
+
+                <div class="form-field">
+                    <label for="submission-reason">Why should this level be ranked?</label>
+                    <textarea
+                        id="submission-reason"
+                        name="reason"
+                        rows="5"
+                        maxlength="2000"
+                        placeholder="Explain your suggestion and provide relevant context..."
+                        required
+                    ></textarea>
+                </div>
+
+                <label class="form-checkbox">
+                    <input type="checkbox" id="submission-confirm" required>
+                    <span>
+                        I confirm that the information is accurate and
+                        understand that staff decide the final ranking.
+                    </span>
+                </label>
+
+                <button
+                    class="button button-primary auth-submit"
+                    type="submit"
+                >
+                    Submit for Review
+                </button>
+
+                <p
+                    class="form-message"
+                    id="submission-message"
+                    role="status"
+                    aria-live="polite"
+                ></p>
+            </form>
+
+            <p class="auth-terms">
+                Submissions are suggestions, not guaranteed placements.
+                Duplicate, misleading, or inappropriate submissions may
+                be rejected.
+            </p>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <a class="footer-brand" href="index.html">HLL</a>
+        <p>Hardest Levels List</p>
+        <p class="footer-note">
+            Independent community rankings. Staff-reviewed submissions.
+        </p>
+    </footer>
+</body>
+</html>

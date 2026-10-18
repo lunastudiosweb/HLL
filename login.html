@@ -1,0 +1,143 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0c0d10">
+    <meta name="description" content="Sign in or create your HLL account.">
+    <title>Log In — HLL</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="script.js" defer></script>
+</head>
+<body>
+    <header class="site-header">
+        <a class="brand" href="index.html" aria-label="HLL Home">
+            <span class="brand-mark">HLL</span>
+            <span class="brand-name">HARDEST LEVELS LIST</span>
+        </a>
+
+        <nav class="main-nav" aria-label="Main navigation">
+            <a class="nav-link" href="index.html">Home</a>
+            <a class="nav-link" href="main-list.html">Main List</a>
+            <a class="nav-link" href="extended-list.html">Extended</a>
+            <a class="nav-link" href="players.html">Players</a>
+        </nav>
+
+        <a class="login-button" href="login.html" aria-current="page">
+            Account
+        </a>
+    </header>
+
+    <main class="auth-page">
+        <section class="auth-card">
+            <a class="auth-back" href="index.html">
+                ← Back to HLL
+            </a>
+
+            <p class="eyebrow">YOUR HLL ACCOUNT</p>
+            <h1 id="auth-title">Welcome <span>back.</span></h1>
+
+            <p class="auth-description" id="auth-description">
+                Sign in to manage your profile and submit completions.
+            </p>
+
+            <div class="auth-tabs" role="group" aria-label="Account action">
+                <button
+                    class="auth-tab active"
+                    id="login-tab"
+                    type="button"
+                    aria-pressed="true"
+                >
+                    Log In
+                </button>
+
+                <button
+                    class="auth-tab"
+                    id="signup-tab"
+                    type="button"
+                    aria-pressed="false"
+                >
+                    Create Account
+                </button>
+            </div>
+
+            <form id="auth-form">
+                <div class="form-field">
+                    <label for="username">Username</label>
+                    <input
+                        type="text"
+                        id="username"
+                        name="username"
+                        placeholder="Your HLL username"
+                        minlength="3"
+                        maxlength="24"
+                        autocomplete="username"
+                        required
+                        hidden
+                    >
+                    <p class="field-hint" id="username-hint" hidden>
+                        This will be your public HLL username.
+                    </p>
+                </div>
+
+                <div class="form-field">
+                    <label for="email">Email address</label>
+                    <input
+                        type="email"
+                        id="email"
+                        name="email"
+                        placeholder="you@example.com"
+                        autocomplete="email"
+                        required
+                    >
+                </div>
+
+                <div class="form-field">
+                    <label for="password">Password</label>
+                    <input
+                        type="password"
+                        id="password"
+                        name="password"
+                        placeholder="Enter your password"
+                        minlength="8"
+                        autocomplete="current-password"
+                        required
+                    >
+                    <p class="field-hint" id="password-hint">
+                        Use at least 8 characters.
+                    </p>
+                </div>
+
+                <button
+                    class="button button-primary auth-submit"
+                    type="submit"
+                    id="auth-submit"
+                >
+                    Log In
+                </button>
+
+                <p
+                    class="form-message"
+                    id="auth-message"
+                    role="status"
+                    aria-live="polite"
+                ></p>
+            </form>
+
+            <p class="auth-terms">
+                By creating an account, you agree to use HLL honestly.
+                Fake completion claims may result in moderation.
+            </p>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <a class="footer-brand" href="index.html">HLL</a>
+        <p>Hardest Levels List</p>
+        <p class="footer-note">
+            Independent community rankings. Staff-reviewed submissions.
+        </p>
+    </footer>
+</body>
+</html>

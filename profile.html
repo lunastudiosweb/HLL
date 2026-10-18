@@ -1,0 +1,115 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0c0d10">
+    <meta name="description" content="View an HLL player's profile, ranking, points, and verified Geometry Dash completions.">
+    <title>Player Profile — HLL</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="script.js" defer></script>
+</head>
+<body>
+    <header class="site-header">
+        <a class="brand" href="index.html" aria-label="HLL Home">
+            <span class="brand-mark">HLL</span>
+            <span class="brand-name">HARDEST LEVELS LIST</span>
+        </a>
+
+        <nav class="main-nav" aria-label="Main navigation">
+            <a class="nav-link" href="index.html">Home</a>
+            <a class="nav-link" href="main-list.html">Main List</a>
+            <a class="nav-link" href="extended-list.html">Extended</a>
+            <a class="nav-link" href="players.html">Players</a>
+        </nav>
+
+        <a class="login-button" href="login.html">Log In</a>
+    </header>
+
+    <main>
+        <section class="hero">
+            <p class="eyebrow">HLL PLAYER PROFILE</p>
+            <h1 id="profile-heading">PLAYER <span>PROFILE.</span></h1>
+            <p class="hero-description" id="profile-description">
+                Player information and verified achievements will appear here.
+            </p>
+
+            <div class="hero-actions" id="profile-actions">
+                <a class="button button-primary" href="login.html">
+                    Sign In
+                </a>
+                <a class="button button-secondary" href="players.html">
+                    Player Leaderboard
+                </a>
+            </div>
+        </section>
+
+        <section class="list-section">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">PLAYER STATISTICS</p>
+                    <h2>Overview</h2>
+                </div>
+            </div>
+
+            <div class="stats">
+                <div class="stat">
+                    <span class="stat-number" id="profile-rank">—</span>
+                    <span class="stat-label">Player Rank</span>
+                </div>
+
+                <div class="stat">
+                    <span class="stat-number" id="profile-points">0</span>
+                    <span class="stat-label">Total Points</span>
+                </div>
+
+                <div class="stat">
+                    <span class="stat-number" id="profile-completions">0</span>
+                    <span class="stat-label">Verified Completions</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="list-section">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">PROGRESS</p>
+                    <h2>Completed Levels</h2>
+                </div>
+                <span class="section-tag">VERIFIED</span>
+            </div>
+
+            <div class="ranking-list" id="profile-completion-list">
+                <div class="empty-state">
+                    <h3>No completions to display</h3>
+                    <p>
+                        Verified level completions will appear here
+                        after staff approval.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <section class="submit-section">
+            <p class="eyebrow">READY TO COMPETE?</p>
+            <h2>Start earning points.</h2>
+            <p>
+                Submit completion evidence for ranked levels.
+                Staff verification is required before points are awarded.
+            </p>
+            <a class="button button-primary" href="login.html">
+                Sign In to HLL
+            </a>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <a class="footer-brand" href="index.html">HLL</a>
+        <p>Hardest Levels List</p>
+        <p class="footer-note">
+            Independent community rankings. Staff-reviewed submissions.
+        </p>
+    </footer>
+</body>
+</html>
