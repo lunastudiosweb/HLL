@@ -48,9 +48,7 @@
             font-size: .9rem;
         }
 
-        .auth-back:hover {
-            color: #fff;
-        }
+        .auth-back:hover { color: #fff; }
 
         .auth-card .eyebrow {
             color: #a99aff;
@@ -66,9 +64,7 @@
             letter-spacing: -.045em;
         }
 
-        .auth-card h1 span {
-            color: #a99aff;
-        }
+        .auth-card h1 span { color: #a99aff; }
 
         .auth-description {
             margin-bottom: 26px;
@@ -105,8 +101,9 @@
             box-shadow: inset 0 0 0 1px rgba(169,154,255,.2);
         }
 
-        .auth-tab:disabled {
-            opacity: .6;
+        .auth-tab:disabled,
+        .auth-submit:disabled {
+            opacity: .65;
             cursor: wait;
         }
 
@@ -144,9 +141,7 @@
             transition: border-color .2s, box-shadow .2s;
         }
 
-        .form-field input::placeholder {
-            color: #686875;
-        }
+        .form-field input::placeholder { color: #686875; }
 
         .form-field input:focus {
             border-color: #a99aff;
@@ -169,11 +164,6 @@
             font-weight: 800;
         }
 
-        .auth-submit:disabled {
-            cursor: wait;
-            opacity: .65;
-        }
-
         .form-message {
             margin: 0;
             padding: 0;
@@ -182,9 +172,7 @@
             overflow-wrap: anywhere;
         }
 
-        .form-message:empty {
-            display: none;
-        }
+        .form-message:empty { display: none; }
 
         .form-message[data-type="error"] {
             padding: 12px;
@@ -202,8 +190,13 @@
             color: #9de7b5;
         }
 
-        .form-message[data-type="info"] {
+        .form-message[data-type="info"] { color: #c7c1ff; }
+
+        .continue-link {
+            display: inline-block;
+            margin-top: 12px;
             color: #c7c1ff;
+            font-weight: 700;
         }
 
         .auth-terms {
@@ -213,18 +206,11 @@
             line-height: 1.7;
         }
 
-        .site-footer {
-            text-align: center;
-        }
+        .site-footer { text-align: center; }
 
         @media (max-width: 480px) {
-            .auth-page {
-                padding: 30px 14px;
-            }
-
-            .auth-card {
-                border-radius: 18px;
-            }
+            .auth-page { padding: 30px 14px; }
+            .auth-card { border-radius: 18px; }
         }
     </style>
 </head>
@@ -261,19 +247,13 @@
             </p>
 
             <div class="auth-tabs" role="group" aria-label="Account action">
-                <button
-                    class="auth-tab active"
-                    id="login-tab"
-                    type="button"
-                    aria-pressed="true">
+                <button class="auth-tab active" id="login-tab"
+                    type="button" aria-pressed="true">
                     Log In
                 </button>
 
-                <button
-                    class="auth-tab"
-                    id="signup-tab"
-                    type="button"
-                    aria-pressed="false">
+                <button class="auth-tab" id="signup-tab"
+                    type="button" aria-pressed="false">
                     Create Account
                 </button>
             </div>
@@ -281,14 +261,9 @@
             <form id="auth-form">
                 <div class="form-field" id="username-field" hidden>
                     <label for="username">HLL username</label>
-
-                    <input
-                        type="text"
-                        id="username"
-                        name="username"
+                    <input type="text" id="username" name="username"
                         placeholder="Choose a username"
-                        minlength="3"
-                        maxlength="24"
+                        minlength="3" maxlength="24"
                         autocomplete="username"
                         pattern="[a-zA-Z0-9_-]+"
                         title="Use letters, numbers, underscores, and hyphens.">
@@ -301,26 +276,16 @@
 
                 <div class="form-field">
                     <label for="email">Email address</label>
-
-                    <input
-                        type="email"
-                        id="email"
-                        name="email"
+                    <input type="email" id="email" name="email"
                         placeholder="you@example.com"
-                        autocomplete="email"
-                        required>
+                        autocomplete="email" required>
                 </div>
 
                 <div class="form-field">
                     <label for="password">Password</label>
-
-                    <input
-                        type="password"
-                        id="password"
-                        name="password"
+                    <input type="password" id="password" name="password"
                         placeholder="Enter your password"
-                        minlength="8"
-                        autocomplete="current-password"
+                        minlength="8" autocomplete="current-password"
                         required>
 
                     <p class="field-hint" id="password-hint">
@@ -328,18 +293,18 @@
                     </p>
                 </div>
 
-                <button
-                    class="button button-primary auth-submit"
-                    type="submit"
-                    id="auth-submit">
+                <button class="button button-primary auth-submit"
+                    type="submit" id="auth-submit">
                     Log In
                 </button>
 
-                <p
-                    class="form-message"
-                    id="auth-message"
-                    role="status"
-                    aria-live="polite"></p>
+                <p class="form-message" id="auth-message"
+                    role="status" aria-live="polite"></p>
+
+                <a href="main-list.html" id="continue-to-hll"
+                    class="continue-link" hidden>
+                    Continue to HLL →
+                </a>
             </form>
 
             <p class="auth-terms">
@@ -380,6 +345,7 @@
     const passwordInput = $("password");
     const submitButton = $("auth-submit");
     const message = $("auth-message");
+    const continueLink = $("continue-to-hll");
 
     let signupMode = false;
     let submitting = false;
@@ -394,23 +360,24 @@
         delete message.dataset.type;
     }
 
-    /*
-     * Only allow local relative destinations.
-     * Normal login defaults to main-list.html.
-     */
     function getDestination() {
-        const params = new URLSearchParams(location.search);
-        const next = params.get("next");
+        const next = new URLSearchParams(location.search).get("next");
 
-        if (
-            next &&
-            !next.startsWith("/") &&
-            !next.startsWith("\\") &&
-            !next.includes(":") &&
-            !next.includes("\\\\") &&
-            !/[\r\n]/.test(next)
-        ) {
-            return next;
+        if (next) {
+            try {
+                const destination = new URL(next, location.href);
+
+                if (
+                    destination.origin === location.origin &&
+                    !next.startsWith("//") &&
+                    !next.startsWith("\\") &&
+                    !/[\r\n]/.test(next)
+                ) {
+                    return destination.href;
+                }
+            } catch {
+                // Use the default destination for invalid URLs.
+            }
         }
 
         return "main-list.html";
@@ -419,6 +386,7 @@
     function setMode(signup) {
         signupMode = signup;
         clearMessage();
+        continueLink.hidden = true;
 
         usernameField.hidden = !signup;
         usernameInput.required = signup;
@@ -466,11 +434,11 @@
         const lower = raw.toLowerCase();
 
         if (lower.includes("invalid login credentials")) {
-            return "Incorrect email or password. Please check your details.";
+            return "Incorrect email or password. Check your details and try again.";
         }
 
         if (lower.includes("email not confirmed")) {
-            return "Please confirm your email address before logging in.";
+            return "Your email isn't confirmed yet. Check your inbox for the confirmation link.";
         }
 
         if (
@@ -488,7 +456,7 @@
             lower.includes("failed to fetch") ||
             lower.includes("networkerror")
         ) {
-            return "Could not connect to Supabase. Check your connection.";
+            return "Couldn't connect to Supabase. Check your internet connection.";
         }
 
         return raw;
@@ -506,6 +474,7 @@
         event.preventDefault();
 
         if (submitting) return;
+
         clearMessage();
 
         if (!form.reportValidity()) return;
@@ -530,13 +499,21 @@
                 );
                 return;
             }
+
+            if (password.length < 8) {
+                showMessage(
+                    "Your password must contain at least 8 characters.",
+                    "error"
+                );
+                return;
+            }
         }
 
         setBusy(true);
 
         try {
             if (signupMode) {
-                const redirect = new URL(
+                const emailRedirect = new URL(
                     "login.html",
                     location.href
                 ).href;
@@ -545,7 +522,7 @@
                     email,
                     password,
                     options: {
-                        emailRedirectTo: redirect,
+                        emailRedirectTo: emailRedirect,
                         data: { username }
                     }
                 });
@@ -557,17 +534,14 @@
                     setMode(false);
 
                     showMessage(
-                        "Account created! Check your email for a confirmation link. After confirming, log in here.",
+                        "Account created! Check your email for a confirmation link. Once confirmed, log in here.",
                         "success"
                     );
                     return;
                 }
 
-                /*
-                 * A database trigger may create the profile.
-                 * If your setup requires profile creation from the client,
-                 * your Supabase RLS policies must permit it.
-                 */
+                // Attempt to create a profile if one does not exist.
+                // Database triggers or RLS policies may handle this instead.
                 try {
                     const { data: existingProfile, error: lookupError } =
                         await authClient
@@ -590,23 +564,19 @@
 
                         if (insertError) {
                             console.warn(
-                                "HLL profile creation needs checking:",
+                                "Profile creation failed:",
                                 insertError.message
                             );
                         }
                     }
                 } catch (profileError) {
                     console.warn(
-                        "Could not verify HLL profile:",
+                        "Could not verify the profile:",
                         profileError.message
                     );
                 }
 
-                showMessage(
-                    "Account created! Opening HLL...",
-                    "success"
-                );
-
+                showMessage("Account created! Opening HLL...", "success");
                 location.replace(getDestination());
                 return;
             }
@@ -619,16 +589,13 @@
 
             if (error) throw error;
 
-            if (!data.user) {
-                throw new Error("No user was returned. Please try again.");
+            if (!data.session || !data.user) {
+                throw new Error(
+                    "No active session was returned. Please try again."
+                );
             }
 
             showMessage("Login successful! Opening HLL...", "success");
-
-            /*
-             * The normal destination is main-list.html.
-             * We redirect only after Supabase confirms successful login.
-             */
             location.replace(getDestination());
 
         } catch (error) {
@@ -639,10 +606,7 @@
         }
     });
 
-    /*
-     * Existing sessions go to the same safe destination.
-     * This check does not redirect users who are not logged in.
-     */
+    // Check for an existing session, but don't automatically redirect.
     async function checkSession() {
         try {
             const { data, error } = await authClient.auth.getSession();
@@ -650,10 +614,21 @@
             if (error) throw error;
 
             if (data.session) {
-                location.replace(getDestination());
+                showMessage(
+                    "You're already signed in on this device. You can log in with another account or continue to HLL.",
+                    "info"
+                );
+
+                continueLink.href = getDestination();
+                continueLink.hidden = false;
+
+                if (data.session.user?.email) {
+                    emailInput.value = data.session.user.email;
+                }
             }
         } catch (error) {
             console.error("HLL session check failed:", error);
+            // Keep the form usable even if session lookup fails.
         }
     }
 
