@@ -1907,3 +1907,31 @@ document.addEventListener("DOMContentLoaded", () => {
     }, 200);
 });
 
+async function updateProfileSubmitButton() {
+    const button = document.getElementById("profile-submit-button");
+
+    if (!button || !supabaseClient) return;
+
+    const { data: { user }, error } =
+        await supabaseClient.auth.getUser();
+
+    if (error || !user) {
+        button.textContent = "Sign In to HLL";
+        button.href = "login.html";
+        return;
+    }
+
+    button.textContent = "Submit a Completion";
+    button.href = "submit.html";
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
+    await updateProfileSubmitButton();
+
+    if (supabaseClient) {
+        supabaseClient.auth.onAuthStateChange(() => {
+            updateProfileSubmitButton();
+        });
+    }
+});
+
