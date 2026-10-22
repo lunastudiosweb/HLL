@@ -113,7 +113,6 @@ async function ensureProfile() {
         .insert({ id: currentUser.id, username, bio: "", gd_username: "" }).select().single();
     if (!insertError) { currentProfile = created; return created; }
 
-    // A parallel tab/signup flow may have inserted the row already.
     const retry = await supabaseClient.from("profiles").select("*").eq("id", currentUser.id).maybeSingle();
     if (retry.data) { currentProfile = retry.data; return retry.data; }
     console.warn("Could not create profile:", insertError.message);
@@ -121,33 +120,7 @@ async function ensureProfile() {
 }
 async function requireLogin() {
     const user = await loadCurrentUser();
-    if (!user) {
-        const next = encodeURIComponent(location.pathname + location.search);
-        location.href = `login.html?next=${next}`;
-        return null;
-    }
-    return user;
-}
-async function logout() {
-    if (!supabaseClient) return;
-    const { error } = await supabaseClient.auth.signOut();
-    if (error) { alert("Could not log out: " + getErrorMessage(error)); return; }
-    currentUser = null;
-    currentProfile = null;
-    location.href = "index.html";
-}
-function updateLoginButton() {
-    const button = document.querySelector(".login-button");
-    if (!button) return;
-    button.textContent = currentUser ? "My Account" : "Log In";
-    button.href = currentUser ? `profile.html?id=${encodeURIComponent(currentUser.id)}` : "login.html";
-}
-function updateProfileSubmitButton() {
-    const button = $("profile-submit-button") || document.querySelector(".submit-section .button");
-    if (!button) return;
-    button.textContent = currentUser ? "Submit a Completion" : "Sign In to HLL";
-    button.href = currentUser ? "completion.html" : `login.html?next=${
-       /* Approved lists. Requires levels.status = 'approved' and rank/list_type columns. */
+    if (!user) {/* Approved levels */
 async function getApprovedLevels(listType = null) {
     let query = supabaseClient.from("levels")
         .select("id, name, level_id, creator, list_type, rank, description")
@@ -156,130 +129,313 @@ async function getApprovedLevels(listType = null) {
     const { data, error } = await query;
     if (error) {
         console.error("Level loading failed:", error.message);
-        showEmptyState($("ranking-list"), "Could not load levels", "Please refresh. If the problem continues, check the levels schema and Supabase read policies.");
+        showEmptyState($("ranking-list"), "Could not load levels", "Check the levels table columns and Supabase read policies.");
         return null;
     }
     return data || [];
 }
+
 async function renderLevelList(listType) {
     const list = $("ranking-list"), count = $("list-count"), search = $("level-search");
     if (!list) return;
     showEmptyState(list, "Loading levels...", "Fetching approved rankings from HLL.");
     const levels = await getApprovedLevels(listType);
-    if (levels === null) { if (count) count.textContent = "Rankings could not be loaded."; return; }
+    if (levels === null) {
+        if (count) count.textContent = "Rankings could not be loaded.";
+        return;
+    }
 
     function render(items) {
         if (count) count.textContent = `${items.length} level${items.length === 1 ? "" : "s"}`;
-        if (!items.length) { showEmptyState(list, "No levels found", "Approved levels for this list will appear here when added."); return; }
-        list.innerHTML = items.map(level => `
-            <a class="ranking-item" href="level.html?id=${encodeURIComponent(level.id)}">
-                <span class="ranking-position">#${escapeHTML(level.rank ?? "—")}</span>
-                <span class="ranking-details">
-                    <strong>${escapeHTML(level.name || "Unnamed level")}</strong>
-                    <span>${escapeHTML(level.creator || "Unknown creator")}</span>
-                </span>
-                <span class="ranking-arrow" aria-hidden="true">›</span>
-            </a>`).join("");
-    }
-    render(levels);
-    if (search && search.dataset.hllBound !== "true") {
-        search.dataset.hllBound = "true";
-        search.addEventListener("input", () => {
-            const term = search.value.trim().toLowerCase();
-            render(levels.filter(level =>
-                String(level.name || "").toLowerCase().includes(term) ||
-                String(level.creator || "").toLowerCase().includes(term) ||
-                String(level.rank ?? "").includes(term) ||
-                String(level.level_id || "").toLowerCase().includes(term)
-            ));
-        });
-    }
-}
-
-/* Players */
-async function renderPlayersList() {
-    const list = $("player-list"), count = $("player-count"), search = $("player-search");
-    if (!list) return;
-    showEmptyState(list, "Loading players...", "Fetching HLL player profiles.");
-    const { data: profiles, error } = await supabaseClient.from("profiles")
-        .select("id, username, gd_username, bio").order("username", { ascending: true });
-    if (error) { console.error(error.message); show
-
-   /* Player profile */
+        if (!items.length) {
+            showEmptyState(list, "No levels found", "Approved levels for this list will appear here when added.");
+            return;
+        }/* Player profile */
 async function renderProfile() {
     const heading = $("profile-heading"), description = $("profile-description");
     const actions = $("profile-actions"), rank = $("profile-rank"), points = $("profile-points");
     const completionsCount = $("profile-completions"), completionList = $("profile-completion-list");
     if (!heading) return;
     const profileId = getQueryParameter("id") || currentUser?.id;
+
     if (!profileId) {
         heading.textContent = "Player not found";
         if (description) description.textContent = "Log in or select a player profile.";
         if (actions) actions.innerHTML = '<a class="button button-primary" href="login.html">Sign In</a><a class="button button-secondary" href="players.html">Player Leaderboard</a>';
         return;
     }
+
     const { data: profile, error } = await supabaseClient.from("profiles")
         .select("id, username, bio, gd_username, avatar_url, created_at, show_bio, show_gd_username, show_avatar")
         .eq("id", profileId).maybeSingle();
+
     if (error || !profile) {
         heading.textContent = "Player not found";
         if (description) description.textContent = "This profile may not exist or may not be publicly accessible.";
         return;
     }
+
     heading.textContent = profile.username || "Player";
     if (description) description.textContent = profile.show_bio === false
         ? "This player has hidden their biography." : (profile.bio || "No biography yet.");
+
     const own = currentUser?.id === profile.id;
     if (actions) actions.innerHTML = own
         ? '<a class="button button-primary" href="settings.html">Edit profile</a><a class="button button-secondary" href="completion.html">Submit a Completion</a>'
         : '<a class="button button-secondary" href="players.html">Player Leaderboard</a>';
+
     if (rank) rank.textContent = "—";
     if (points) points.textContent = "Not configured";
 
     const { data: completions, error: completionError } = await supabaseClient.from("completions")
         .select("id, level_id, verified_at").eq("user_id", profile.id).order("verified_at", { ascending: false });
-    if (completionError) { showEmptyState(completionList, "Could not load completions", "Please try again later."); return; }
+
+    if (completionError) {
+        showEmptyState(completionList, "Could not load completions", "Please try again later.");
+        return;
+    }
+
     const verified = completions || [];
     if (completionsCount) completionsCount.textContent = String(verified.length);
     if (!completionList) return;
-    if (!verified.length) { showEmptyState(completionList, "No verified completions", "Verified level completions will appear here."); return; }
+    if (!verified.length) {
+        showEmptyState(completionList, "No verified completions", "Verified level completions will appear here.");
+        return;
+    }
 
     const ids = verified.map(c => c.level_id);
     const { data: levels, error: levelError } = await supabaseClient.from("levels")
         .select("id, name, rank, list_type").in("id", ids);
-    if (levelError) { showEmptyState(completionList, "Could not load
-                                         if (form.dataset.hllSettingsBound === "true") return;
+
+    if (levelError) {
+        showEmptyState(completionList, "Could not load level details", "Please try again later.");
+        return;
+    }
+
+    const byId = Object.fromEntries((levels || []).map(level => [level.id, level]));
+    const html = verified.map(c => {
+        const level = byId[c.level_id];
+        if (!level) return "";
+        return `<a class="ranking-item" href="level.html?id=${encodeURIComponent(level.id)}">
+            <span class="ranking-position">#${escapeHTML(level.rank ?? "—")}</span>
+            <span class="ranking-details">
+                <strong>${escapeHTML(level.name || "Unnamed level")}</strong>
+                <span>Verified ${escapeHTML(formatDate(c.verified_at))}</span>
+            </span>
+        </a>`;
+    }).filter(Boolean).join("");
+
+    if (html) completionList.innerHTML = html;
+    else showEmptyState(completionList, "No verified completions", "Verified level completions will appear here.");
+}
+
+/* Level details */
+async function renderLevelDetail() {
+    const title = $("level-title");
+    if (!title) return;
+    const id = getQueryParameter("id");
+    if (!id) { title.textContent = "Level not found"; return; }
+
+    const { data: level, error } = await supabaseClient.from("levels").select("*")
+        .eq("id", id).eq("status", "approved").maybeSingle();
+
+    if (error || !level) { title.textContent = "Level not found"; return; }
+
+    title.textContent = level.name || "Unnamed level";
+    if ($("level-list-type")) $("level-list-type").textContent = level.list_type === "main" ? "Main List" : "Extended List";
+    if ($("level-description")) $("level-description").textContent = level.description || "No description provided.";
+    if ($("level-rank")) $("level-rank").textContent = `#${level.rank ?? "—"}`;
+    if ($("level-points")) $("level-points").textContent = "Not configured";
+    if ($("level-detail-name")) $("level-detail-name").textContent = level.name || "Unnamed level";
+    if ($("level-creator")) $("level-creator").textContent = level.creator || "Unknown";
+    if ($("level-id")) $("level-id").textContent = level.level_id || "Not provided";
+    if ($("level-status")) $("level-status").textContent = "Approved";
+    if ($("level-completion-count")) $("level-completion-count").textContent = "Loading...";
+
+    const list = $("level-completions");
+    const { data: completions, error: completionError } = await supabaseClient.from("completions")
+        .select("id, user_id, verified_at").eq("level_id", level.id).order("verified_at", { ascending: false });
+
+    if (completionError) {
+        showEmptyState(list, "Could not load completions", "Please try again later.");
+        return;
+    }
+
+    const verified = completions || [];
+    if ($("level-completion-count")) $("level-completion-count").textContent = String(verified.length);
+    if (!list) return;
+    if (!verified.length) {
+        showEmptyState(list, "No verified completions yet", "Verified completions will appear here.");
+        return;
+    }
+
+    const userIds = [...new Set(verified.map(c => c.user_id))];
+    const { data: profiles, error: profileError } = await supabaseClient.from("profiles")
+        .select("id, username").in("id", userIds);
+
+    if (profileError) {
+        showEmptyState(list, "Could not load player names", "Please try again later.");
+        return;
+    }
+
+    const names = Object.fromEntries((profiles || []).map(p => [p.id, p.username]));
+    list.innerHTML = verified.map(c => `
+        <a class="ranking-item" href="profile.html?id=${encodeURIComponent(c.user_id)}">
+            <span class="ranking-details">
+                <strong>${escapeHTML(names[c.user_id] || "Player")}</strong>
+                <span>Verified ${escapeHTML(formatDate(c.verified_at))}</span>
+            </span>
+        </a>`).join("");
+}
+
+/* Account settings */
+async function setupSettings() {
+    const form = $("profile-settings-form");
+    if (!form) return;
+
+    const message = $("settings-message");
+    const user = await requireLogin();
+    if (!user) return;
+
+    if ($("settings-current-email")) $("settings-current-email").textContent = user.email || "No email available";
+
+    let profile = currentProfile;
+    if (!profile || profile.id !== user.id) {
+        const result = await supabaseClient.from("profiles").select("*").eq("id", user.id).maybeSingle();
+        if (result.error) {
+            showMessage(message, getErrorMessage(result.error), "error");
+            return;
+        }
+        profile = result.data;
+    }
+
+    if (!profile) {
+        showMessage(message, "Your profile could not be loaded. Please log out and back in.", "error");
+        return;
+    }
+
+    currentProfile = profile;
+
+    if ($("settings-username")) $("settings-username").value = profile.username || "";
+    if ($("settings-bio")) $("settings-bio").value = profile.bio || "";
+    if ($("settings-gd-username")) $("settings-gd-username").value = profile.gd_username || "";
+    if ($("settings-avatar")) $("settings-avatar").value = profile.avatar_url || "";
+    if ($("privacy-show-bio")) $("privacy-show-bio").checked = profile.show_bio !== false;
+    if ($("privacy-show-gd-username")) $("privacy-show-gd-username").checked = profile.show_gd_username !== false;
+    if ($("privacy-show-avatar")) $("privacy-show-avatar").checked = profile.show_avatar !== false;
+
+            if (form.dataset.hllSettingsBound === "true") return;
     form.dataset.hllSettingsBound = "true";
 
     form.addEventListener("submit", async event => {
-        event.preventDefault(); hideMessage(message);
+        event.preventDefault();
+        hideMessage(message);
         const button = form.querySelector('[type="submit"]');
         const username = $("settings-username")?.value.trim() || "";
         const bio = $("settings-bio")?.value.trim() || "";
         const gd = $("settings-gd-username")?.value.trim() || "";
         const avatar = $("settings-avatar")?.value.trim() || "";
-        if (username.length < 3 || username.length > 24) { showMessage(message, "Your username must be between 3 and 24 characters.", "error"); return; }
-        if (!/^[a-zA-Z0-9_-]+$/.test(username)) { showMessage(message, "Use only letters, numbers, underscores, and hyphens in your username.", "error"); return; }
-        if (bio.length > 300 || gd.length > 40) { showMessage(message, "Your bio must be 300 characters or less, and your GD username 40 characters or less.", "error"); return; }
-        if (avatar) {
-            try { const url = new URL(avatar); if (!["http:", "https:"].includes(url.protocol)) throw new Error(); }
-            catch { showMessage(message, "Enter a valid avatar URL beginning with https:// or http://.", "error"); return; }
+
+        if (username.length < 3 || username.length > 24) {
+            showMessage(message, "Your username must be between 3 and 24 characters.", "error");
+            return;
         }
+        if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+            showMessage(message, "Use only letters, numbers, underscores, and hyphens in your username.", "error");
+            return;
+        }
+        if (bio.length > 300 || gd.length > 40) {
+            showMessage(message, "Your bio must be 300 characters or less, and your GD username 40 characters or less.", "error");
+            return;
+        }
+        if (avatar) {
+            try {
+                const url = new URL(avatar);
+                if (!["http:", "https:"].includes(url.protocol)) throw new Error();
+            } catch {
+                showMessage(message, "Enter a valid avatar URL beginning with https:// or http://.", "error");
+                return;
+            }
+        }
+
         setLoading(button, true);
         try {
             const { data, error } = await supabaseClient.from("profiles").update({
                 username, bio, gd_username: gd, avatar_url: avatar || null
             }).eq("id", user.id).select().single();
+
             if (error) throw error;
             currentProfile = { ...currentProfile, ...data };
             showMessage(message, "Profile settings saved successfully!", "success");
-        } catch (error) { showMessage(message, getErrorMessage(error), "error"); }
-        finally { setLoading(button, false); }
+        } catch (error) {
+            showMessage(message, getErrorMessage(error), "error");
+        } finally {
+            setLoading(button, false);
+        }
     });
 
     $("email-settings-form")?.addEventListener("submit", async event => {
         event.preventDefault();
-        const f = event.currentTarget, msg = $("email-settings-message"), button = f.querySelector('[type="submit"]');
+        const f = event.currentTarget;
+        const msg = $("email-settings-message");
+        const button = f.querySelector('[type="submit"]');
         const email = $("settings-new-email")?.value.trim() || "";
         hideMessage(msg);
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showMessage(msg, "Enter a valid email address.", "error");
+
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            showMessage(msg, "Enter a valid email address.", "error");
+            return;
+        }
+        if (email.toLowerCase() === (user.email || "").toLowerCase()) {
+            showMessage(msg, "That is already your current email address.", "error");
+            return;
+        }
+
+        setLoading(button, true);
+        try {
+            const redirectTo = new URL("login.html", location.href).href;
+            const { error } = await supabaseClient.auth.updateUser(
+                { email }, { emailRedirectTo: redirectTo }
+            );
+            if (error) throw error;
+            f.reset();
+            showMessage(msg, "Email change requested. Follow the verification instructions sent by Supabase.", "success");
+        } catch (error) {
+            showMessage(msg, getErrorMessage(error), "error");
+        } finally {
+            setLoading(button, false);
+        }
+    });
+
+    $("password-change-form")?.addEventListener("submit", async event => {
+        event.preventDefault();
+        const f = event.currentTarget;
+        const msg = $("password-change-message");
+        const button = f.querySelector('[type="submit"]');
+        const password = $("settings-new-password")?.value || "";
+        const confirm = $("settings-confirm-password")?.value || "";
+        hideMessage(msg);
+
+        if (password.length < 8) {
+            showMessage(msg, "Your password must contain at least 8 characters.", "error");
+            return;
+        }
+        if (password !== confirm) {
+            showMessage(msg, "The passwords do not match.", "error");
+            return;
+        }
+
+        setLoading(button, true);
+        try {
+            const { error } = await supabaseClient.auth.updateUser({ password });
+            if (error) throw error;
+            f.reset();
+            showMessage(msg, "Your password has been updated successfully.", "success");
+        } catch (error) {
+            showMessage(msg, getErrorMessage(error), "error");
+        } finally {
+            setLoading(button, false);
+        }
+    });
+
+    $("password-reset-button")?.add
