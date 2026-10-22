@@ -18,15 +18,18 @@ function escapeHTML(value) {
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
     })[c]);
 }
+
 function showMessage(el, message, type = "info") {
     if (!el) return;
     el.textContent = message;
     el.dataset.type = type;
     el.hidden = false;
 }
+
 function hideMessage(el) {
     if (el) { el.hidden = true; el.textContent = ""; }
 }
+
 function showEmptyState(el, title, description) {
     if (!el) return;
     const wrap = document.createElement("div");
@@ -38,9 +41,11 @@ function showEmptyState(el, title, description) {
     wrap.append(h, p);
     el.replaceChildren(wrap);
 }
+
 function getErrorMessage(error) {
     return error?.message || "Something went wrong. Please try again.";
 }
+
 function formatDate(value) {
     if (!value) return "Unknown date";
     const date = new Date(value);
@@ -48,6 +53,7 @@ function formatDate(value) {
         year: "numeric", month: "short", day: "numeric"
     });
 }
+
 function setLoading(button, loading, fallback = "Submit") {
     if (!button) return;
     if (loading) {
@@ -60,6 +66,7 @@ function setLoading(button, loading, fallback = "Submit") {
         delete button.dataset.originalText;
     }
 }
+
 function safeNextUrl(next) {
     if (!next) return "index.html";
     if (next.startsWith("/") && !next.startsWith("//")) return next;
@@ -85,12 +92,14 @@ function loadSupabaseLibrary() {
         document.head.appendChild(script);
     });
 }
+
 async function initializeSupabase() {
     await loadSupabaseLibrary();
     if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) throw new Error("Supabase configuration is incomplete.");
     if (!supabaseClient) supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
     return supabaseClient;
 }
+
 async function loadCurrentUser() {
     if (!supabaseClient) return null;
     const { data, error } = await supabaseClient.auth.getUser();
@@ -100,6 +109,7 @@ async function loadCurrentUser() {
     else currentProfile = null;
     return currentUser;
 }
+
 async function ensureProfile() {
     if (!currentUser) return null;
     const { data, error } = await supabaseClient.from("profiles").select("*").eq("id", currentUser.id).maybeSingle();
@@ -118,9 +128,17 @@ async function ensureProfile() {
     console.warn("Could not create profile:", insertError.message);
     return null;
 }
+
 async function requireLogin() {
     const user = await loadCurrentUser();
-    if (!user) {/* Approved levels */
+    if (!user) {
+        location.href = `login.html?next=${encodeURIComponent(location.pathname + location.search)}`;
+        return null;
+    }
+    return user;
+}
+
+/* Approved levels */
 async function getApprovedLevels(listType = null) {
     let query = supabaseClient.from("levels")
         .select("id, name, level_id, creator, list_type, rank, description")
@@ -150,7 +168,34 @@ async function renderLevelList(listType) {
         if (!items.length) {
             showEmptyState(list, "No levels found", "Approved levels for this list will appear here when added.");
             return;
-        }/* Player profile */
+        }
+        
+        list.innerHTML = items.map(level => `
+            <a class="ranking-item" href="level.html?id=${encodeURIComponent(level.id)}">
+                <span class="ranking-position">#${escapeHTML(level.rank ?? "—")}</span>
+                <span class="ranking-details">
+                    <strong>${escapeHTML(level.name || "Unnamed level")}</strong>
+                    <span>By ${escapeHTML(level.creator || "Unknown")}</span>
+                </span>
+            </a>
+        `).join("");
+    }
+
+    render(levels);
+
+    if (search) {
+        search.addEventListener("input", () => {
+            const term = search.value.toLowerCase().trim();
+            const filtered = levels.filter(l => 
+                (l.name && l.name.toLowerCase().includes(term)) || 
+                (l.creator && l.creator.toLowerCase().includes(term))
+            );
+            render(filtered);
+        });
+    }
+}
+
+/* Player profile */
 async function renderProfile() {
     const heading = $("profile-heading"), description = $("profile-description");
     const actions = $("profile-actions"), rank = $("profile-rank"), points = $("profile-points");
@@ -324,7 +369,7 @@ async function setupSettings() {
     if ($("privacy-show-gd-username")) $("privacy-show-gd-username").checked = profile.show_gd_username !== false;
     if ($("privacy-show-avatar")) $("privacy-show-avatar").checked = profile.show_avatar !== false;
 
-            if (form.dataset.hllSettingsBound === "true") return;
+    if (form.dataset.hllSettingsBound === "true") return;
     form.dataset.hllSettingsBound = "true";
 
     form.addEventListener("submit", async event => {
@@ -437,5 +482,4 @@ async function setupSettings() {
             setLoading(button, false);
         }
     });
-
-    $("password-reset-button")?.add
+}
