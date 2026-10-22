@@ -1870,3 +1870,40 @@ async function setupSettings() {
     });
 }
 
+
+
+/* HLL LOGIN BUTTON FIX */
+document.addEventListener("DOMContentLoaded", () => {
+    const updateHLLLoginButton = () => {
+        const button = document.querySelector(".login-button");
+
+        if (!button || !supabaseClient) return;
+
+        supabaseClient.auth.getSession().then(({ data, error }) => {
+            if (error) {
+                console.error("HLL session check failed:", error.message);
+                return;
+            }
+
+            const user = data.session?.user;
+
+            button.textContent = user ? "My Account" : "Log In";
+            button.href = user
+                ? `profile.html?id=${encodeURIComponent(user.id)}`
+                : "login.html";
+        });
+    };
+
+    // Wait for the existing HLL startup to initialize Supabase.
+    const waitForHLL = setInterval(() => {
+        if (supabaseClient) {
+            clearInterval(waitForHLL);
+            updateHLLLoginButton();
+
+            supabaseClient.auth.onAuthStateChange(() => {
+                updateHLLLoginButton();
+            });
+        }
+    }, 200);
+});
+
