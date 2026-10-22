@@ -1421,3 +1421,452 @@ async function startHLL() {
 }
 
 document.addEventListener("DOMContentLoaded", startHLL);
+
+
+/* ============================================
+   12. PROFILE SETTINGS
+   settings.html
+   ============================================ */
+
+async function setupSettings() {
+    const form = $("profile-settings-form");
+    if (!form) return;
+
+    const message = $("settings-message");
+    const user = await requireLogin();
+    if (!user) return;
+
+    const currentEmail = $("settings-current-email");
+
+    if (currentEmail) {
+        currentEmail.textContent = user.email || "No email available";
+    }
+
+    // Load the player's profile.
+    let profile = currentProfile;
+
+    if (!profile || profile.id !== user.id) {
+        const { data, error } = await supabaseClient
+            .from("profiles")
+            .select("*")
+            .eq("id", user.id)
+            .maybeSingle();
+
+        if (error) {
+            showMessage(message, getErrorMessage(error), "error");
+            return;
+        }
+
+        profile = data;
+    }
+
+    if (!profile) {
+        showMessage(
+            message,
+            "Your profile could not be loaded. Please log out and back in.",
+            "error"
+        );
+        return;
+    }
+
+    currentProfile = profile;
+
+    // Populate profile fields.
+    if ($("settings-username")) {
+        $("settings-username").value = profile.username || "";
+    }
+
+    if ($("settings-bio")) {
+        $("settings-bio").value = profile.bio || "";
+    }
+
+    if ($("settings-gd-username")) {
+        $("settings-gd-username").value = profile.gd_username || "";
+    }
+
+    if ($("settings-avatar")) {
+        $("settings-avatar").value = profile.avatar_url || "";
+    }
+
+    // Populate privacy preferences.
+    if ($("privacy-show-bio")) {
+        $("privacy-show-bio").checked = profile.show_bio !== false;
+    }
+
+    if ($("privacy-show-gd-username")) {
+        $("privacy-show-gd-username").checked =
+            profile.show_gd_username !== false;
+    }
+
+    if ($("privacy-show-avatar")) {
+        $("privacy-show-avatar").checked = profile.show_avatar !== false;
+    }
+
+    // Prevent duplicate event handlers if setup is called again.
+    if (form.dataset.hllSettingsBound === "true") return;
+    form.dataset.hllSettingsBound = "true";
+
+    /* --------------------------------------------
+       SAVE PROFILE
+       -------------------------------------------- */
+
+    form.addEventListener("submit", async event => {
+        event.preventDefault();
+        hideMessage(message);
+
+        const button = form.querySelector('[type="submit"]');
+
+        const username = $("settings-username")?.value.trim() || "";
+        const bio = $("settings-bio")?.value.trim() || "";
+        const gdUsername =
+            $("settings-gd-username")?.value.trim() || "";
+        const avatarUrl = $("settings-avatar")?.value.trim() || "";
+
+        if (username.length < 3 || username.length > 24) {
+            showMessage(
+                message,
+                "Your username must be between 3 and 24 characters.",
+                "error"
+            );
+            return;
+        }
+
+        if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+            showMessage(
+                message,
+                "Use only letters, numbers, underscores, and hyphens in your username.",
+                "error"
+            );
+            return;
+        }
+
+        if (bio.length > 300 || gdUsername.length > 40) {
+            showMessage(
+                message,
+                "Your bio must be 300 characters or less, and your GD username must be 40 characters or less.",
+                "error"
+            );
+            return;
+        }
+
+        if (avatarUrl) {
+            try {
+                const url = new URL(avatarUrl);
+
+                if (!["http:", "https:"].includes(url.protocol)) {
+                    throw new Error("Invalid protocol");
+                }
+            } catch {
+                showMessage(
+                    message,
+                    "Enter a valid avatar URL beginning with https:// or http://.",
+                    "error"
+                );
+                return;
+            }
+        }
+
+        setLoading(button, true);
+
+        try {
+            const { data, error } = await supabaseClient
+                .from("profiles")
+                .update({
+                    username,
+                    bio,
+                    gd_username: gdUsername,
+                    avatar_url: avatarUrl || null
+                })
+                .eq("id", user.id)
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            currentProfile = {
+                ...currentProfile,
+                ...data
+            };
+
+            showMessage(
+                message,
+                "Profile settings saved successfully!",
+                "success"
+            );
+        } catch (error) {
+            showMessage(message, getErrorMessage(error), "error");
+        } finally {
+            setLoading(button, false);
+        }
+    });
+
+    /* --------------------------------------------
+       CHANGE EMAIL
+       Requires Supabase email confirmation settings.
+       -------------------------------------------- */
+
+    $("email-settings-form")?.addEventListener(
+        "submit",
+        async event => {
+            event.preventDefault();
+
+            const emailForm = event.currentTarget;
+            const emailMessage = $("email-settings-message");
+            const button = emailForm.querySelector('[type="submit"]');
+            const newEmail = $("settings-new-email")?.value.trim() || "";
+
+            hideMessage(emailMessage);
+
+            if (!newEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+                showMessage(
+                    emailMessage,
+                    "Enter a valid email address.",
+                    "error"
+                );
+                return;
+            }
+
+            if (newEmail.toLowerCase() === (user.email || "").toLowerCase()) {
+                showMessage(
+                    emailMessage,
+                    "That is already your current email address.",
+                    "error"
+                );
+                return;
+            }
+
+            setLoading(button, true);
+
+            try {
+                const redirectUrl = new URL(
+                    "login.html",
+                    window.location.href
+                ).href;
+
+                const { error } = await supabaseClient.auth.updateUser(
+                    { email: newEmail },
+                    { emailRedirectTo: redirectUrl }
+                );
+
+                if (error) throw error;
+
+                emailForm.reset();
+
+                showMessage(
+                    emailMessage,
+                    "Email change requested. Follow the verification instructions sent by Supabase. Your displayed email will update after the change is confirmed.",
+                    "success"
+                );
+            } catch (error) {
+                showMessage(
+                    emailMessage,
+                    getErrorMessage(error),
+                    "error"
+                );
+            } finally {
+                setLoading(button, false);
+            }
+        }
+    );
+
+    /* --------------------------------------------
+       CHANGE PASSWORD
+       -------------------------------------------- */
+
+    $("password-change-form")?.addEventListener(
+        "submit",
+        async event => {
+            event.preventDefault();
+
+            const passwordForm = event.currentTarget;
+            const passwordMessage = $("password-change-message");
+            const button = passwordForm.querySelector('[type="submit"]');
+
+            const newPassword =
+                $("settings-new-password")?.value || "";
+            const confirmPassword =
+                $("settings-confirm-password")?.value || "";
+
+            hideMessage(passwordMessage);
+
+            if (newPassword.length < 8) {
+                showMessage(
+                    passwordMessage,
+                    "Your password must contain at least 8 characters.",
+                    "error"
+                );
+                return;
+            }
+
+            if (newPassword !== confirmPassword) {
+                showMessage(
+                    passwordMessage,
+                    "The passwords do not match.",
+                    "error"
+                );
+                return;
+            }
+
+            setLoading(button, true);
+
+            try {
+                const { error } = await supabaseClient.auth.updateUser({
+                    password: newPassword
+                });
+
+                if (error) throw error;
+
+                passwordForm.reset();
+
+                showMessage(
+                    passwordMessage,
+                    "Your password has been updated successfully.",
+                    "success"
+                );
+            } catch (error) {
+                showMessage(
+                    passwordMessage,
+                    getErrorMessage(error),
+                    "error"
+                );
+            } finally {
+                setLoading(button, false);
+            }
+        }
+    );
+
+    /* --------------------------------------------
+       PASSWORD RECOVERY EMAIL
+       -------------------------------------------- */
+
+    $("password-reset-button")?.addEventListener(
+        "click",
+        async () => {
+            const resetMessage = $("password-reset-message");
+            const button = $("password-reset-button");
+
+            hideMessage(resetMessage);
+
+            if (!user.email) {
+                showMessage(
+                    resetMessage,
+                    "No email address is associated with this account.",
+                    "error"
+                );
+                return;
+            }
+
+            setLoading(button, true);
+
+            try {
+                const redirectUrl = new URL(
+                    "login.html",
+                    window.location.href
+                ).href;
+
+                const { error } =
+                    await supabaseClient.auth.resetPasswordForEmail(
+                        user.email,
+                        { redirectTo: redirectUrl }
+                    );
+
+                if (error) throw error;
+
+                showMessage(
+                    resetMessage,
+                    "If password recovery is enabled, check your email for the reset link.",
+                    "success"
+                );
+            } catch (error) {
+                showMessage(
+                    resetMessage,
+                    getErrorMessage(error),
+                    "error"
+                );
+            } finally {
+                setLoading(button, false);
+            }
+        }
+    );
+
+    /* --------------------------------------------
+       PRIVACY PREFERENCES
+       Requires these columns in profiles:
+       show_bio, show_gd_username, show_avatar
+       -------------------------------------------- */
+
+    $("privacy-settings-form")?.addEventListener(
+        "submit",
+        async event => {
+            event.preventDefault();
+
+            const privacyForm = event.currentTarget;
+            const privacyMessage = $("privacy-settings-message");
+            const button = privacyForm.querySelector('[type="submit"]');
+
+            hideMessage(privacyMessage);
+            setLoading(button, true);
+
+            const preferences = {
+                show_bio: $("privacy-show-bio")?.checked ?? true,
+                show_gd_username:
+                    $("privacy-show-gd-username")?.checked ?? true,
+                show_avatar: $("privacy-show-avatar")?.checked ?? true
+            };
+
+            try {
+                const { data, error } = await supabaseClient
+                    .from("profiles")
+                    .update(preferences)
+                    .eq("id", user.id)
+                    .select()
+                    .single();
+
+                if (error) throw error;
+
+                currentProfile = {
+                    ...currentProfile,
+                    ...data
+                };
+
+                showMessage(
+                    privacyMessage,
+                    "Privacy preferences saved. Public profile pages must also enforce these settings before the fields will be hidden from visitors.",
+                    "success"
+                );
+            } catch (error) {
+                showMessage(
+                    privacyMessage,
+                    "Could not save privacy settings: " +
+                        getErrorMessage(error),
+                    "error"
+                );
+            } finally {
+                setLoading(button, false);
+            }
+        }
+    );
+
+    /* --------------------------------------------
+       ACCOUNT DELETION
+       Intentionally disabled until a secure server
+       endpoint has been deployed and tested.
+       -------------------------------------------- */
+
+    const deleteButton = $("delete-account-button");
+
+    if (deleteButton) {
+        deleteButton.disabled = true;
+        deleteButton.title =
+            "Account deletion is unavailable until the secure server endpoint is deployed.";
+    }
+
+    $("delete-account-button")?.addEventListener("click", () => {
+        showMessage(
+            $("delete-account-message"),
+            "Account deletion is not enabled yet. A secure server-side Supabase Edge Function must be deployed first. No account data has been deleted.",
+            "error"
+        );
+    });
+}
+
