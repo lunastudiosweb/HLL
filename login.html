@@ -6,11 +6,229 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#0c0d10">
     <meta name="description" content="Sign in or create your HLL account.">
-    <title>Log In — HLL</title>
+    <title>Account — HLL</title>
     <link rel="stylesheet" href="style.css">
-
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <style>
+        :root {
+            color-scheme: dark;
+        }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background:
+                radial-gradient(ellipse at 50% 0%, rgba(120, 90, 255, .13), transparent 55%),
+                #0c0d10;
+        }
+
+        .auth-page {
+            flex: 1;
+            display: grid;
+            place-items: center;
+            padding: 56px 20px;
+        }
+
+        .auth-card {
+            width: min(100%, 460px);
+            padding: clamp(24px, 5vw, 40px);
+            border: 1px solid rgba(255, 255, 255, .1);
+            border-radius: 24px;
+            background: rgba(18, 19, 25, .94);
+            box-shadow: 0 24px 90px rgba(0, 0, 0, .3);
+        }
+
+        .auth-back {
+            display: inline-block;
+            margin-bottom: 30px;
+            color: #a8a8b5;
+            text-decoration: none;
+            font-size: .9rem;
+        }
+
+        .auth-back:hover {
+            color: #fff;
+        }
+
+        .auth-card .eyebrow {
+            color: #a99aff;
+            font-size: .75rem;
+            font-weight: 800;
+            letter-spacing: .16em;
+        }
+
+        .auth-card h1 {
+            margin: 12px 0;
+            font-size: clamp(2rem, 7vw, 2.7rem);
+            line-height: 1.12;
+            letter-spacing: -.045em;
+        }
+
+        .auth-card h1 span {
+            color: #a99aff;
+        }
+
+        .auth-description {
+            margin-bottom: 26px;
+            color: #a8a8b5;
+            line-height: 1.65;
+        }
+
+        .auth-tabs {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            padding: 5px;
+            margin-bottom: 24px;
+            border: 1px solid rgba(255,255,255,.07);
+            border-radius: 13px;
+            background: #0c0d10;
+        }
+
+        .auth-tab {
+            min-height: 43px;
+            border: 0;
+            border-radius: 9px;
+            background: transparent;
+            color: #a8a8b5;
+            cursor: pointer;
+            font: inherit;
+            font-weight: 700;
+            transition: background .2s, color .2s;
+        }
+
+        .auth-tab.active {
+            background: #272331;
+            color: #fff;
+            box-shadow: inset 0 0 0 1px rgba(169,154,255,.2);
+        }
+
+        .auth-tab:disabled {
+            opacity: .6;
+            cursor: wait;
+        }
+
+        #auth-form {
+            display: grid;
+            gap: 18px;
+        }
+
+        .form-field {
+            display: grid;
+            gap: 8px;
+        }
+
+        .form-field[hidden] {
+            display: none !important;
+        }
+
+        .form-field label {
+            color: #e7e7ed;
+            font-size: .9rem;
+            font-weight: 650;
+        }
+
+        .form-field input {
+            box-sizing: border-box;
+            width: 100%;
+            min-height: 48px;
+            padding: 12px 14px;
+            border: 1px solid #34343e;
+            border-radius: 11px;
+            outline: none;
+            background: #101116;
+            color: #fff;
+            font: inherit;
+            transition: border-color .2s, box-shadow .2s;
+        }
+
+        .form-field input::placeholder {
+            color: #686875;
+        }
+
+        .form-field input:focus {
+            border-color: #a99aff;
+            box-shadow: 0 0 0 3px rgba(169,154,255,.12);
+        }
+
+        .field-hint {
+            margin: 0;
+            color: #898996;
+            font-size: .8rem;
+            line-height: 1.5;
+        }
+
+        .auth-submit {
+            width: 100%;
+            min-height: 49px;
+            margin-top: 4px;
+            border-radius: 11px;
+            font-size: .98rem;
+            font-weight: 800;
+        }
+
+        .auth-submit:disabled {
+            cursor: wait;
+            opacity: .65;
+        }
+
+        .form-message {
+            margin: 0;
+            padding: 0;
+            font-size: .88rem;
+            line-height: 1.6;
+            overflow-wrap: anywhere;
+        }
+
+        .form-message:empty {
+            display: none;
+        }
+
+        .form-message[data-type="error"] {
+            padding: 12px;
+            border: 1px solid rgba(255,100,100,.2);
+            border-radius: 10px;
+            background: rgba(255,70,70,.07);
+            color: #ffaaaa;
+        }
+
+        .form-message[data-type="success"] {
+            padding: 12px;
+            border: 1px solid rgba(100,220,150,.2);
+            border-radius: 10px;
+            background: rgba(70,220,130,.07);
+            color: #9de7b5;
+        }
+
+        .form-message[data-type="info"] {
+            color: #c7c1ff;
+        }
+
+        .auth-terms {
+            margin: 24px 0 0;
+            color: #777783;
+            font-size: .78rem;
+            line-height: 1.7;
+        }
+
+        .site-footer {
+            text-align: center;
+        }
+
+        @media (max-width: 480px) {
+            .auth-page {
+                padding: 30px 14px;
+            }
+
+            .auth-card {
+                border-radius: 18px;
+            }
+        }
+    </style>
 </head>
+
 <body>
     <header class="site-header">
         <a class="brand" href="index.html" aria-label="HLL Home">
@@ -32,9 +250,7 @@
 
     <main class="auth-page">
         <section class="auth-card">
-            <a class="auth-back" href="index.html">
-                ← Back to HLL
-            </a>
+            <a class="auth-back" href="index.html">← Back to HLL</a>
 
             <p class="eyebrow">YOUR HLL ACCOUNT</p>
 
@@ -64,21 +280,20 @@
 
             <form id="auth-form">
                 <div class="form-field" id="username-field" hidden>
-                    <label for="username">Username</label>
+                    <label for="username">HLL username</label>
 
                     <input
                         type="text"
                         id="username"
                         name="username"
-                        placeholder="Your HLL username"
+                        placeholder="Choose a username"
                         minlength="3"
                         maxlength="24"
                         autocomplete="username"
                         pattern="[a-zA-Z0-9_-]+"
-                        title="Use letters, numbers, underscores, and hyphens."
-                    >
+                        title="Use letters, numbers, underscores, and hyphens.">
 
-                    <p class="field-hint" id="username-hint">
+                    <p class="field-hint">
                         3–24 characters. Letters, numbers, underscores,
                         and hyphens only.
                     </p>
@@ -93,8 +308,7 @@
                         name="email"
                         placeholder="you@example.com"
                         autocomplete="email"
-                        required
-                    >
+                        required>
                 </div>
 
                 <div class="form-field">
@@ -107,11 +321,10 @@
                         placeholder="Enter your password"
                         minlength="8"
                         autocomplete="current-password"
-                        required
-                    >
+                        required>
 
                     <p class="field-hint" id="password-hint">
-                        Use at least 8 characters.
+                        Enter your account password.
                     </p>
                 </div>
 
@@ -126,8 +339,7 @@
                     class="form-message"
                     id="auth-message"
                     role="status"
-                    aria-live="polite">
-                </p>
+                    aria-live="polite"></p>
             </form>
 
             <p class="auth-terms">
@@ -148,68 +360,81 @@
     <script>
     "use strict";
 
-    /* ==========================================
-       HLL AUTHENTICATION
-       ========================================== */
-
-    const SUPABASE_URL =
+    const HLL_SUPABASE_URL =
         "https://ldtnptrhnpulvjwdtzwa.supabase.co";
 
-    const SUPABASE_PUBLISHABLE_KEY =
+    const HLL_SUPABASE_KEY =
         "sb_publishable_WXmIU22zRyh_MYtS1jFOJw_b8N9VVYo";
 
     const authClient = window.supabase.createClient(
-        SUPABASE_URL,
-        SUPABASE_PUBLISHABLE_KEY
+        HLL_SUPABASE_URL,
+        HLL_SUPABASE_KEY
     );
 
-    const authForm = document.getElementById("auth-form");
-    const loginTab = document.getElementById("login-tab");
-    const signupTab = document.getElementById("signup-tab");
-    const usernameField = document.getElementById("username-field");
-    const usernameInput = document.getElementById("username");
-    const emailInput = document.getElementById("email");
-    const passwordInput = document.getElementById("password");
-    const submitButton = document.getElementById("auth-submit");
-    const messageElement = document.getElementById("auth-message");
-    const titleElement = document.getElementById("auth-title");
-    const descriptionElement = document.getElementById("auth-description");
-    const passwordHint = document.getElementById("password-hint");
+    const $ = id => document.getElementById(id);
 
-    let isSignup = false;
-    let isSubmitting = false;
+    const form = $("auth-form");
+    const usernameField = $("username-field");
+    const usernameInput = $("username");
+    const emailInput = $("email");
+    const passwordInput = $("password");
+    const submitButton = $("auth-submit");
+    const message = $("auth-message");
 
-    function showMessage(message, type = "info") {
-        messageElement.textContent = message;
-        messageElement.dataset.type = type;
-        messageElement.hidden = false;
+    let signupMode = false;
+    let submitting = false;
+
+    function showMessage(text, type = "info") {
+        message.textContent = text;
+        message.dataset.type = type;
     }
 
     function clearMessage() {
-        messageElement.textContent = "";
-        messageElement.hidden = true;
-        delete messageElement.dataset.type;
+        message.textContent = "";
+        delete message.dataset.type;
     }
 
-    function setAuthMode(signup) {
-        isSignup = signup;
+    /*
+     * Only allow local relative destinations.
+     * Normal login defaults to main-list.html.
+     */
+    function getDestination() {
+        const params = new URLSearchParams(location.search);
+        const next = params.get("next");
+
+        if (
+            next &&
+            !next.startsWith("/") &&
+            !next.startsWith("\\") &&
+            !next.includes(":") &&
+            !next.includes("\\\\") &&
+            !/[\r\n]/.test(next)
+        ) {
+            return next;
+        }
+
+        return "main-list.html";
+    }
+
+    function setMode(signup) {
+        signupMode = signup;
         clearMessage();
 
         usernameField.hidden = !signup;
         usernameInput.required = signup;
 
-        loginTab.classList.toggle("active", !signup);
-        signupTab.classList.toggle("active", signup);
+        $("login-tab").classList.toggle("active", !signup);
+        $("signup-tab").classList.toggle("active", signup);
 
-        loginTab.setAttribute("aria-pressed", String(!signup));
-        signupTab.setAttribute("aria-pressed", String(signup));
+        $("login-tab").setAttribute("aria-pressed", String(!signup));
+        $("signup-tab").setAttribute("aria-pressed", String(signup));
 
-        titleElement.innerHTML = signup
+        $("auth-title").innerHTML = signup
             ? 'Create your <span>account.</span>'
             : 'Welcome <span>back.</span>';
 
-        descriptionElement.textContent = signup
-            ? "Create an HLL account to join the rankings community."
+        $("auth-description").textContent = signup
+            ? "Create an account to join the HLL community."
             : "Sign in to manage your profile and submit completions.";
 
         submitButton.textContent = signup
@@ -220,77 +445,76 @@
             ? "new-password"
             : "current-password";
 
-        passwordHint.textContent = signup
-            ? "Your password must contain at least 8 characters."
+        $("password-hint").textContent = signup
+            ? "Use at least 8 characters."
             : "Enter your account password.";
-
-        usernameInput.autocomplete = signup
-            ? "username"
-            : "off";
     }
 
-    function getSafeNextUrl() {
-        const params = new URLSearchParams(window.location.search);
-        const next = params.get("next");
+    function setBusy(busy) {
+        submitting = busy;
+        submitButton.disabled = busy;
+        $("login-tab").disabled = busy;
+        $("signup-tab").disabled = busy;
 
-        if (
-            next &&
-            !next.startsWith("//") &&
-            !next.includes(":") &&
-            !next.startsWith("\\\\")
-        ) {
-            return next;
+        submitButton.textContent = busy
+            ? "Please wait..."
+            : signupMode ? "Create Account" : "Log In";
+    }
+
+    function friendlyError(error) {
+        const raw = error?.message || "Something went wrong.";
+        const lower = raw.toLowerCase();
+
+        if (lower.includes("invalid login credentials")) {
+            return "Incorrect email or password. Please check your details.";
         }
 
-        return "index.html";
+        if (lower.includes("email not confirmed")) {
+            return "Please confirm your email address before logging in.";
+        }
+
+        if (
+            lower.includes("user already registered") ||
+            lower.includes("already been registered")
+        ) {
+            return "An account with this email already exists. Try logging in.";
+        }
+
+        if (lower.includes("password should be at least")) {
+            return "Your password must contain at least 8 characters.";
+        }
+
+        if (
+            lower.includes("failed to fetch") ||
+            lower.includes("networkerror")
+        ) {
+            return "Could not connect to Supabase. Check your connection.";
+        }
+
+        return raw;
     }
 
-    function setSubmitting(submitting) {
-        isSubmitting = submitting;
-        submitButton.disabled = submitting;
-        loginTab.disabled = submitting;
-        signupTab.disabled = submitting;
-
-        submitButton.textContent = submitting
-            ? "Please wait..."
-            : isSignup
-                ? "Create Account"
-                : "Log In";
-    }
-
-    loginTab.addEventListener("click", () => {
-        if (!isSubmitting) setAuthMode(false);
+    $("login-tab").addEventListener("click", () => {
+        if (!submitting) setMode(false);
     });
 
-    signupTab.addEventListener("click", () => {
-        if (!isSubmitting) setAuthMode(true);
+    $("signup-tab").addEventListener("click", () => {
+        if (!submitting) setMode(true);
     });
 
-    authForm.addEventListener("submit", async event => {
+    form.addEventListener("submit", async event => {
         event.preventDefault();
 
-        if (isSubmitting) return;
-
+        if (submitting) return;
         clearMessage();
+
+        if (!form.reportValidity()) return;
 
         const email = emailInput.value.trim();
         const password = passwordInput.value;
         const username = usernameInput.value.trim();
 
-        if (!email || !password) {
-            showMessage("Please enter your email and password.", "error");
-            return;
-        }
-
-        if (password.length < 8) {
-            showMessage(
-                "Your password must contain at least 8 characters.",
-                "error"
-            );
-            return;
-        }
-
-        if (isSignup) {
+        if (signupMode) {
             if (username.length < 3 || username.length > 24) {
                 showMessage(
                     "Your username must be between 3 and 24 characters.",
@@ -301,52 +525,89 @@
 
             if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
                 showMessage(
-                    "Use only letters, numbers, underscores, and hyphens in your username.",
+                    "Use only letters, numbers, underscores, and hyphens.",
                     "error"
                 );
                 return;
             }
         }
 
-        setSubmitting(true);
+        setBusy(true);
 
         try {
-            if (isSignup) {
-                const redirectUrl = new URL(
+            if (signupMode) {
+                const redirect = new URL(
                     "login.html",
-                    window.location.href
+                    location.href
                 ).href;
 
                 const { data, error } = await authClient.auth.signUp({
                     email,
                     password,
                     options: {
-                        emailRedirectTo: redirectUrl,
-                        data: {
-                            username: username
-                        }
+                        emailRedirectTo: redirect,
+                        data: { username }
                     }
                 });
 
                 if (error) throw error;
 
-                if (data.session) {
+                if (!data.session) {
+                    form.reset();
+                    setMode(false);
+
                     showMessage(
-                        "Account created successfully! Redirecting...",
+                        "Account created! Check your email for a confirmation link. After confirming, log in here.",
                         "success"
                     );
-
-                    window.location.replace(getSafeNextUrl());
                     return;
                 }
 
+                /*
+                 * A database trigger may create the profile.
+                 * If your setup requires profile creation from the client,
+                 * your Supabase RLS policies must permit it.
+                 */
+                try {
+                    const { data: existingProfile, error: lookupError } =
+                        await authClient
+                            .from("profiles")
+                            .select("id")
+                            .eq("id", data.user.id)
+                            .maybeSingle();
+
+                    if (lookupError) throw lookupError;
+
+                    if (!existingProfile) {
+                        const { error: insertError } = await authClient
+                            .from("profiles")
+                            .insert({
+                                id: data.user.id,
+                                username,
+                                bio: "",
+                                gd_username: ""
+                            });
+
+                        if (insertError) {
+                            console.warn(
+                                "HLL profile creation needs checking:",
+                                insertError.message
+                            );
+                        }
+                    }
+                } catch (profileError) {
+                    console.warn(
+                        "Could not verify HLL profile:",
+                        profileError.message
+                    );
+                }
+
                 showMessage(
-                    "Account created! Check your email for a confirmation link before logging in.",
+                    "Account created! Opening HLL...",
                     "success"
                 );
 
-                authForm.reset();
-                setAuthMode(false);
+                location.replace(getDestination());
                 return;
             }
 
@@ -359,70 +620,45 @@
             if (error) throw error;
 
             if (!data.user) {
-                throw new Error(
-                    "Login did not return a user. Please try again."
-                );
+                throw new Error("No user was returned. Please try again.");
             }
 
-            showMessage(
-                "Login successful! Redirecting...",
-                "success"
-            );
+            showMessage("Login successful! Opening HLL...", "success");
 
-            window.location.replace(getSafeNextUrl());
+            /*
+             * The normal destination is main-list.html.
+             * We redirect only after Supabase confirms successful login.
+             */
+            location.replace(getDestination());
 
         } catch (error) {
             console.error("HLL authentication error:", error);
-
-            let message = error?.message ||
-                "Something went wrong. Please try again.";
-
-            if (
-                message.toLowerCase().includes("invalid login credentials")
-            ) {
-                message =
-                    "Incorrect email or password. Check your details and try again.";
-            } else if (
-                message.toLowerCase().includes("email not confirmed")
-            ) {
-                message =
-                    "Please confirm your email address before logging in.";
-            } else if (
-                message.toLowerCase().includes("user already registered")
-            ) {
-                message =
-                    "An account with this email already exists. Try logging in instead.";
-            } else if (
-                message.toLowerCase().includes("failed to fetch")
-            ) {
-                message =
-                    "Could not connect to Supabase. Check your internet connection and Supabase status.";
-            }
-
-            showMessage(message, "error");
-
+            showMessage(friendlyError(error), "error");
         } finally {
-            setSubmitting(false);
+            setBusy(false);
         }
     });
 
-    /* Start in login mode; username validation stays disabled while hidden. */
-    setAuthMode(false);
-
-    /* If already signed in, avoid showing the login form again. */
-    (async function checkExistingSession() {
+    /*
+     * Existing sessions go to the same safe destination.
+     * This check does not redirect users who are not logged in.
+     */
+    async function checkSession() {
         try {
             const { data, error } = await authClient.auth.getSession();
 
             if (error) throw error;
 
             if (data.session) {
-                window.location.replace(getSafeNextUrl());
+                location.replace(getDestination());
             }
         } catch (error) {
-            console.error("Could not check HLL session:", error);
+            console.error("HLL session check failed:", error);
         }
-    })();
+    }
+
+    setMode(false);
+    checkSession();
     </script>
 </body>
 </html>
