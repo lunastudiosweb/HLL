@@ -38,116 +38,118 @@
                 Customize your public profile and manage your account.
             </p>
 
-            <form id="profile-settings-form">
-                <div class="form-field">
-                    <label for="settings-username">Public username</label>
-                    <input
-                        type="text"
-                        id="settings-username"
-                        name="username"
-                        placeholder="Your HLL username"
-                        minlength="3"
-                        maxlength="24"
-                        autocomplete="nickname"
-                        required
-                    >
-                    <p class="field-hint">
-                        Your username identifies you on the leaderboard.
-                    </p>
+            <section class="settings-section" aria-labelledby="settings-account-heading">
+                <h2 id="settings-account-heading">Email address</h2>
+                <p class="settings-intro">Your email is private and used for account access and security notifications.</p>
+                <div class="settings-account-current">
+                    <span class="settings-label">Current email</span>
+                    <strong id="settings-current-email">Loading…</strong>
                 </div>
-
-                <div class="form-field">
-                    <label for="settings-bio">Profile bio</label>
-                    <textarea
-                        id="settings-bio"
-                        name="bio"
-                        rows="4"
-                        maxlength="300"
-                        placeholder="Tell the HLL community about yourself..."
-                    ></textarea>
-                </div>
-
-                <div class="form-field">
-                    <label for="settings-gd-username">Geometry Dash username</label>
-                    <input
-                        type="text"
-                        id="settings-gd-username"
-                        name="gd_username"
-                        maxlength="100"
-                        placeholder="Your in-game username"
-                    >
-                </div>
-
-                <div class="form-field">
-                    <label for="settings-avatar">Avatar image URL (optional)</label>
-                    <input
-                        type="url"
-                        id="settings-avatar"
-                        name="avatar_url"
-                        maxlength="1000"
-                        placeholder="https://..."
-                    >
-                    <p class="field-hint">
-                        Use an image URL you control or have permission to use.
-                    </p>
-                </div>
-
-                <button
-                    class="button button-primary auth-submit"
-                    type="submit"
-                >
-                    Save Profile
-                </button>
-
-                <p
-                    class="form-message"
-                    id="settings-message"
-                    role="status"
-                    aria-live="polite"
-                ></p>
-            </form>
+                <form id="email-settings-form" class="settings-form">
+                    <div class="form-field">
+                        <label for="settings-new-email">New email address</label>
+                        <input type="email" id="settings-new-email" name="email" autocomplete="email" maxlength="254" placeholder="you@example.com" required>
+                    </div>
+                    <button class="button button-secondary" type="submit">Change Email</button>
+                    <p class="form-message" id="email-settings-message" role="status" aria-live="polite" hidden></p>
+                </form>
+                <p class="field-hint">Supabase may send a confirmation link to verify the new address. Your email changes only after the required verification is completed.</p>
+            </section>
 
             <div class="settings-divider"></div>
 
-            <div class="settings-group">
-                <h2>Account security</h2>
-                <p>
-                    Password changes and account recovery will be handled
-                    through Supabase authentication.
-                </p>
-
-                <button
-                    class="button button-secondary auth-submit"
-                    type="button"
-                    id="password-reset-button"
-                >
-                    Request Password Reset
-                </button>
-
-                <p
-                    class="form-message"
-                    id="password-reset-message"
-                    role="status"
-                    aria-live="polite"
-                ></p>
-            </div>
+            <section class="settings-section" aria-labelledby="settings-profile-heading">
+                <h2 id="settings-profile-heading">Public profile</h2>
+                <p class="settings-intro">These details help other players recognize you around HLL.</p>
+                <form id="profile-settings-form" class="settings-form">
+                    <div class="form-field">
+                        <label for="settings-username">Public username</label>
+                        <input type="text" id="settings-username" name="username" placeholder="Your HLL username" minlength="3" maxlength="24" autocomplete="nickname" required>
+                        <p class="field-hint">3–24 characters. Use letters, numbers, underscores, or hyphens.</p>
+                    </div>
+                    <div class="form-field">
+                        <label for="settings-bio">Profile bio</label>
+                        <textarea id="settings-bio" name="bio" rows="4" maxlength="300" placeholder="Tell the HLL community about yourself…"></textarea>
+                    </div>
+                    <div class="form-field">
+                        <label for="settings-gd-username">Geometry Dash username</label>
+                        <input type="text" id="settings-gd-username" name="gd_username" maxlength="40" placeholder="Your in-game username" autocomplete="off">
+                    </div>
+                    <div class="form-field">
+                        <label for="settings-avatar">Avatar image URL (optional)</label>
+                        <input type="url" id="settings-avatar" name="avatar_url" maxlength="1000" placeholder="https://…">
+                        <p class="field-hint">Use an image URL you control or have permission to use.</p>
+                    </div>
+                    <button class="button button-primary" type="submit">Save Profile</button>
+                    <p class="form-message" id="settings-message" role="status" aria-live="polite" hidden></p>
+                </form>
+            </section>
 
             <div class="settings-divider"></div>
 
-            <div class="settings-group">
-                <h2>Sign out</h2>
-                <p>
-                    Sign out of your HLL account on this device.
-                </p>
+            <section class="settings-section" aria-labelledby="settings-privacy-heading">
+                <h2 id="settings-privacy-heading">Profile privacy</h2>
+                <p class="settings-intro">Choose which optional details appear on your public HLL profile. Your email address is never shown publicly by these controls.</p>
+                <form id="privacy-settings-form" class="settings-form">
+                    <label class="settings-toggle" for="privacy-show-bio">
+                        <span><strong>Show my bio</strong><small>Allow visitors to read your profile bio.</small></span>
+                        <input type="checkbox" id="privacy-show-bio" name="show_bio" checked>
+                    </label>
+                    <label class="settings-toggle" for="privacy-show-gd-username">
+                        <span><strong>Show my Geometry Dash username</strong><small>Display your in-game username on your public profile.</small></span>
+                        <input type="checkbox" id="privacy-show-gd-username" name="show_gd_username" checked>
+                    </label>
+                    <label class="settings-toggle" for="privacy-show-avatar">
+                        <span><strong>Show my avatar</strong><small>Allow your avatar URL to be used on your public profile.</small></span>
+                        <input type="checkbox" id="privacy-show-avatar" name="show_avatar" checked>
+                    </label>
+                    <button class="button button-secondary" type="submit">Save Privacy Settings</button>
+                    <p class="form-message" id="privacy-settings-message" role="status" aria-live="polite" hidden></p>
+                </form>
+            </section>
 
-                <button
-                    class="button button-secondary auth-submit"
-                    type="button"
-                    id="logout-button"
-                >
-                    Log Out
-                </button>
-            </div>
+            <div class="settings-divider"></div>
+
+            <section class="settings-section" aria-labelledby="settings-password-heading">
+                <h2 id="settings-password-heading">Password management</h2>
+                <p class="settings-intro">Set a new password while signed in, or request a secure recovery link by email.</p>
+                <form id="password-change-form" class="settings-form">
+                    <div class="form-field">
+                        <label for="settings-new-password">New password</label>
+                        <input type="password" id="settings-new-password" name="new_password" minlength="8" autocomplete="new-password" required>
+                        <p class="field-hint">Use at least 8 characters.</p>
+                    </div>
+                    <div class="form-field">
+                        <label for="settings-confirm-password">Confirm new password</label>
+                        <input type="password" id="settings-confirm-password" name="confirm_password" minlength="8" autocomplete="new-password" required>
+                    </div>
+                    <button class="button button-primary" type="submit">Update Password</button>
+                    <p class="form-message" id="password-change-message" role="status" aria-live="polite" hidden></p>
+                </form>
+                <button class="button button-secondary settings-secondary-action" type="button" id="password-reset-button">Email Me a Password Reset Link</button>
+                <p class="form-message" id="password-reset-message" role="status" aria-live="polite" hidden></p>
+            </section>
+
+            <div class="settings-divider"></div>
+
+            <section class="settings-section" aria-labelledby="settings-session-heading">
+                <h2 id="settings-session-heading">Session management</h2>
+                <p class="settings-intro">Sign out of HLL on this device. You can sign back in at any time.</p>
+                <button class="button button-secondary" type="button" id="logout-button">Log Out</button>
+            </section>
+
+            <div class="settings-divider"></div>
+
+            <section class="settings-section settings-danger-zone" aria-labelledby="settings-delete-heading">
+                <h2 id="settings-delete-heading">Delete account</h2>
+                <p class="settings-intro">Permanently delete your HLL account. This action cannot be undone. Your account deletion endpoint must be deployed before this action can complete.</p>
+                <div class="form-field">
+                    <label for="settings-delete-confirmation">Type DELETE to confirm</label>
+                    <input type="text" id="settings-delete-confirmation" autocomplete="off" placeholder="DELETE" maxlength="6">
+                </div>
+                <button class="button button-danger" type="button" id="delete-account-button">Permanently Delete My Account</button>
+                <p class="form-message" id="delete-account-message" role="status" aria-live="polite" hidden></p>
+            </section>
         </section>
     </main>
 
