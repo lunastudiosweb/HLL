@@ -1,8 +1,6 @@
-You fix it
-
 /* =========================================================
    HLL — HARDEST LEVELS LIST
-   Complete Main JavaScript
+   Complete consolidated JavaScript
    ========================================================= */
 
 "use strict";
@@ -117,17 +115,11 @@ function setLoading(button, loading, fallback = "Submit") {
 function safeNextUrl(next) {
     if (!next) return "index.html";
 
-    if (
-        next.startsWith("/") &&
-        !next.startsWith("//")
-    ) {
+    if (next.startsWith("/") && !next.startsWith("//")) {
         return next;
     }
 
-    if (
-        !next.includes(":") &&
-        !next.startsWith("//")
-    ) {
+    if (!next.includes(":") && !next.startsWith("//")) {
         return next;
     }
 
@@ -137,7 +129,6 @@ function safeNextUrl(next) {
 function validHttpUrl(value) {
     try {
         const url = new URL(value);
-
         return ["http:", "https:"].includes(url.protocol);
     } catch {
         return false;
@@ -184,11 +175,7 @@ function loadSupabaseLibrary() {
         script.onload = resolve;
 
         script.onerror = () => {
-            reject(
-                new Error(
-                    "Supabase could not load. Check your connection."
-                )
-            );
+            reject(new Error("Supabase could not load. Check your connection."));
         };
 
         document.head.appendChild(script);
@@ -298,11 +285,7 @@ async function ensureProfile() {
         return retry.data;
     }
 
-    console.warn(
-        "Could not create profile:",
-        insertError.message
-    );
-
+    console.warn("Could not create profile:", insertError.message);
     return null;
 }
 
@@ -386,14 +369,11 @@ function registerAuthListener() {
 function setupAuthTabs() {
     const loginTab = $("login-tab");
     const signupTab = $("signup-tab");
-
     const title = $("auth-title");
     const description = $("auth-description");
-
     const username = $("username");
     const usernameHint = $("username-hint");
     const passwordHint = $("password-hint");
-
     const submit = $("auth-submit");
     const form = $("auth-form");
 
@@ -421,18 +401,12 @@ function setupAuthTabs() {
 
         if (loginTab) {
             loginTab.classList.toggle("active", !signingUp);
-            loginTab.setAttribute(
-                "aria-selected",
-                String(!signingUp)
-            );
+            loginTab.setAttribute("aria-selected", String(!signingUp));
         }
 
         if (signupTab) {
             signupTab.classList.toggle("active", signingUp);
-            signupTab.setAttribute(
-                "aria-selected",
-                String(signingUp)
-            );
+            signupTab.setAttribute("aria-selected", String(signingUp));
         }
 
         if (username) {
@@ -440,13 +414,8 @@ function setupAuthTabs() {
             username.required = signingUp;
         }
 
-        if (usernameHint) {
-            usernameHint.hidden = !signingUp;
-        }
-
-        if (passwordHint) {
-            passwordHint.hidden = !signingUp;
-        }
+        if (usernameHint) usernameHint.hidden = !signingUp;
+        if (passwordHint) passwordHint.hidden = !signingUp;
 
         if (submit) {
             submit.textContent = signingUp
@@ -474,11 +443,7 @@ function setupAuthTabs() {
             const enteredUsername = $("username")?.value.trim();
 
             if (!email || !password) {
-                showMessage(
-                    message,
-                    "Enter your email and password.",
-                    "error"
-                );
+                showMessage(message, "Enter your email and password.", "error");
                 return;
             }
 
@@ -554,6 +519,7 @@ function setupAuthTabs() {
                         location.href = safeNextUrl(
                             getQueryParameter("next")
                         );
+
                         return;
                     }
 
@@ -580,14 +546,11 @@ function setupAuthTabs() {
                     location.href = safeNextUrl(
                         getQueryParameter("next")
                     );
+
                     return;
                 }
             } catch (error) {
-                showMessage(
-                    message,
-                    getErrorMessage(error),
-                    "error"
-                );
+                showMessage(message, getErrorMessage(error), "error");
             } finally {
                 setLoading(button, false);
             }
@@ -599,33 +562,114 @@ function setupAuthTabs() {
 
 
 /* =========================================================
-   6. APPROVED LEVEL LISTS
+   6. POINTS SYSTEM
+   ========================================================= */
+
+/*
+   CUSTOM POINTS:
+   If levels.points exists and contains a number, that value
+   is used. This lets you edit points directly in Supabase.
+
+   FALLBACK:
+   If no custom points value is available, points are
+   calculated from the level's rank.
+*/
+
+function calculateLevelPoints(rank, listType, customPoints = null) {
+    if (
+        customPoints !== null &&
+        customPoints !== undefined &&
+        customPoints !== ""
+    ) {
+        const configuredPoints = Number(customPoints);
+
+        if (
+            Number.isFinite(configuredPoints) &&
+            configuredPoints >= 0
+        ) {
+            return configuredPoints;
+        }
+    }
+
+    const position = Number(rank);
+
+    if (!Number.isInteger(position)) return 0;
+
+    if (listType === "main") {
+        return position >= 1 && position <= 150
+            ? 151 - position
+            : 0;
+    }
+
+    if (listType === "extended") {
+        return position >= 151 && position <= 350
+            ? Math.floor(((350 - position) * 49) / 199) + 1
+            : 0;
+    }
+
+    return 0;
+}
+
+
+/* =========================================================
+   7. APPROVED LEVELS
    ========================================================= */
 
 async function getApprovedLevels(listType = null) {
+    if (!supabaseClient) return null;
+
+    // First try to read the custom points column.
     let query = supabaseClient
         .from("levels")
         .select(
-            "id, name, level_id, creator, list_type, rank, description"
+            "id, name, level_id, creator, list_type, rank, description, points"
         )
         .eq("status", "approved")
-        .order("rank", {
-            ascending: true
-        });
+        .order("rank", { ascending: true });
 
     if (listType) {
         query = query.eq("list_type", listType);
     }
 
-    const { data, error } = await query;
+    let { data, error } = await query;
+
+    // If the points column is missing, retry without it.
+    if (
+        error &&
+        /points|column|schema cache/i.test(error.message || "")
+    ) {
+        let fallback = supabaseClient
+            .from("levels")
+            .select(
+                "id, name, level_id, creator, list_type, rank, description"
+            )
+            .eq("status", "approved")
+            .order("rank", { ascending: true });
+
+        if (listType) {
+            fallback = fallback.eq("list_type", listType);
+        }
+
+        const retry = await fallback;
+
+        data = retry.data;
+        error = retry.error;
+
+        if (!error) {
+            data = (data || []).map(level => ({
+                ...level,
+                points: null
+            }));
+        }
+    }
 
     if (error) {
-        console.error("Level loading failed:", error.message);
+        console.error("Level loading failed:", error);
 
         showEmptyState(
             $("ranking-list"),
             "Could not load levels",
-            "Please refresh. If the problem continues, check the levels table and Supabase read policies."
+            error.message || "Check the levels table and Supabase read policies."
         );
 
         return null;
@@ -634,6 +678,11 @@ async function getApprovedLevels(listType = null) {
     return data || [];
 }
 
+
+/* =========================================================
+   8. MAIN LIST AND EXTENDED LIST
+   ========================================================= */
+
 async function renderLevelList(listType) {
     const list = $("ranking-list");
     const count = $("list-count");
@@ -641,15 +690,15 @@ async function renderLevelList(listType) {
 
     if (!list) return;
 
-    const isMainList = listType === "main";
-    const minRank = isMainList ? 1 : 151;
-    const maxRank = isMainList ? 150 : 350;
-    const listName = isMainList ? "Main List" : "Extended List";
+    const isMain = listType === "main";
+    const minRank = isMain ? 1 : 151;
+    const maxRank = isMain ? 150 : 350;
+    const listName = isMain ? "Main List" : "Extended List";
 
     showEmptyState(
         list,
         "Loading rankings...",
-        `Fetching approved ${listName} levels from HLL.`
+        `Fetching approved ${listName} levels.`
     );
 
     if (count) count.textContent = "Loading rankings...";
@@ -661,19 +710,20 @@ async function renderLevelList(listType) {
         return;
     }
 
-    // Enforce the official rank range for this list.
-    const levels = allLevels.filter(level => {
-        const rank = Number(level.rank);
+    const levels = allLevels
+        .filter(level => {
+            const rank = Number(level.rank);
 
-        return Number.isInteger(rank) &&
-            rank >= minRank &&
-            rank <= maxRank;
-    });
+            return Number.isInteger(rank) &&
+                rank >= minRank &&
+                rank <= maxRank;
+        })
+        .sort((a, b) => Number(a.rank) - Number(b.rank));
 
     function render(items) {
         if (count) {
             count.textContent =
-                `${items.length} ranked level${items.length === 1 ? "" : "s"} · Ranks #${minRank}–#${maxRank}`;
+                `${items.length} levels · Ranks #${minRank}–#${maxRank}`;
         }
 
         if (!items.length) {
@@ -682,53 +732,77 @@ async function renderLevelList(listType) {
                 "No ranked levels yet",
                 `No approved levels with ranks #${minRank}–#${maxRank} are available in the ${listName}.`
             );
+
             return;
         }
 
-        list.innerHTML = items.map(level => `
-            <a class="ranking-item"
-               href="level.html?id=${encodeURIComponent(level.id)}">
+        list.innerHTML = items.map(level => {
+            const rank = Number(level.rank);
 
-                <span class="ranking-position">
-                    #${escapeHTML(level.rank)}
-                </span>
+            const points = calculateLevelPoints(
+                level.rank,
+                level.list_type,
+                level.points
+            );
 
-                <span class="ranking-details">
-                    <strong>${escapeHTML(level.name || "Unnamed level")}</strong>
-                    <span>
-                        ${escapeHTML(level.creator || "Unknown creator")}
-                        ${level.level_id ? ` · GD ID: ${escapeHTML(level.level_id)}` : ""}
+            let rankClass = "";
+
+            if (rank === 1) rankClass = "rank-first";
+            else if (rank === 2) rankClass = "rank-second";
+            else if (rank === 3) rankClass = "rank-third";
+
+            return `
+                <a
+                    class="ranking-item hll-level-card"
+                    href="level.html?id=${encodeURIComponent(level.id)}"
+                >
+                    <span class="ranking-position ${rankClass}">
+                        #${escapeHTML(rank)}
                     </span>
-                </span>
 
-                <span class="ranking-arrow" aria-hidden="true">›</span>
-            </a>
-        `).join("");
+                    <span class="ranking-details">
+                        <strong>${escapeHTML(level.name || "Unnamed level")}</strong>
+
+                        <span class="hll-level-meta">
+                            ${escapeHTML(level.creator || "Unknown creator")}
+                            ${level.level_id
+                                ? ` · GD ID: ${escapeHTML(level.level_id)}`
+                                : ""}
+                        </span>
+                    </span>
+
+                    <span class="hll-points-badge">
+                        <strong>${Number(points).toLocaleString()}</strong>
+                        <small>POINTS</small>
+                    </span>
+
+                    <span class="ranking-arrow" aria-hidden="true">›</span>
+                </a>
+            `;
+        }).join("");
     }
 
     render(levels);
 
-    if (search && search.dataset.hllBound !== "true") {
-        search.dataset.hllBound = "true";
+    if (search && search.dataset.hllSearchBound !== "true") {
+        search.dataset.hllSearchBound = "true";
 
         search.addEventListener("input", () => {
             const term = search.value.trim().toLowerCase();
 
-            const filtered = levels.filter(level =>
+            render(levels.filter(level =>
                 String(level.name || "").toLowerCase().includes(term) ||
                 String(level.creator || "").toLowerCase().includes(term) ||
                 String(level.rank ?? "").includes(term) ||
                 String(level.level_id || "").toLowerCase().includes(term)
-            );
-
-            render(filtered);
+            ));
         });
     }
 }
 
 
 /* =========================================================
-   7. PLAYER LEADERBOARD
+   9. PLAYER LEADERBOARD
    ========================================================= */
 
 async function renderPlayersList() {
@@ -740,59 +814,127 @@ async function renderPlayersList() {
 
     showEmptyState(
         list,
-        "Loading players...",
-        "Fetching HLL player profiles."
+        "Loading player rankings...",
+        "Calculating points from verified completions."
     );
 
-    const { data: profiles, error } = await supabaseClient
-        .from("profiles")
-        .select("id, username, gd_username, bio")
-        .order("username", {
-            ascending: true
-        });
+    const [
+        profilesResult,
+        levelsResult,
+        completionsResult
+    ] = await Promise.all([
+        supabaseClient
+            .from("profiles")
+            .select("id, username, gd_username")
+            .order("username", { ascending: true }),
 
-    if (error) {
-        console.error(error.message);
+        supabaseClient
+            .from("levels")
+            .select("id, rank, list_type, status, points")
+            .eq("status", "approved"),
 
+        supabaseClient
+            .from("completions")
+            .select("user_id, level_id")
+    ]);
+
+    if (profilesResult.error) {
         showEmptyState(
             list,
             "Could not load players",
-            "Please refresh and try again."
+            profilesResult.error.message
         );
         return;
     }
 
-    const result = await supabaseClient
-        .from("completions")
-        .select("user_id");
+    let levelsData = levelsResult.data;
 
-    if (result.error) {
+    if (
+        levelsResult.error &&
+        /points|column|schema cache/i.test(levelsResult.error.message || "")
+    ) {
+        const fallback = await supabaseClient
+            .from("levels")
+            .select("id, rank, list_type, status")
+            .eq("status", "approved");
+
+        if (fallback.error) {
+            showEmptyState(list, "Could not load levels", fallback.error.message);
+            return;
+        }
+
+        levelsData = (fallback.data || []).map(level => ({
+            ...level,
+            points: null
+        }));
+    } else if (levelsResult.error) {
         showEmptyState(
             list,
-            "Could not load player statistics",
-            "Please try again later."
+            "Could not calculate points",
+            levelsResult.error.message
         );
         return;
     }
 
-    const counts = {};
-
-    for (const item of result.data || []) {
-        counts[item.user_id] =
-            (counts[item.user_id] || 0) + 1;
+    if (completionsResult.error) {
+        showEmptyState(
+            list,
+            "Could not load verified completions",
+            completionsResult.error.message
+        );
+        return;
     }
 
-    const players = (profiles || [])
-        .map(profile => ({
-            ...profile,
-            completionCount: counts[profile.id] || 0
-        }))
-        .sort((a, b) =>
-            b.completionCount - a.completionCount ||
-            String(a.username || "").localeCompare(
-                String(b.username || "")
-            )
+    const levelPoints = new Map();
+
+    for (const level of levelsData || []) {
+        const points = calculateLevelPoints(
+            level.rank,
+            level.list_type,
+            level.points
         );
+
+        if (points > 0) {
+            levelPoints.set(level.id, points);
+        }
+    }
+
+    const playerTotals = new Map();
+
+    for (const profile of profilesResult.data || []) {
+        playerTotals.set(profile.id, {
+            ...profile,
+            points: 0,
+            completions: 0
+        });
+    }
+
+    // Count each player's completion of a level only once.
+    const countedCompletions = new Set();
+
+    for (const completion of completionsResult.data || []) {
+        const player = playerTotals.get(completion.user_id);
+        const points = levelPoints.get(completion.level_id);
+
+        if (!player || points === undefined || points <= 0) {
+            continue;
+        }
+
+        const key = `${completion.user_id}:${completion.level_id}`;
+
+        if (countedCompletions.has(key)) continue;
+
+        countedCompletions.add(key);
+
+        player.points += points;
+        player.completions += 1;
+    }
+
+    const players = [...playerTotals.values()].sort((a, b) =>
+        b.points - a.points ||
+        b.completions - a.completions ||
+        String(a.username || "").localeCompare(String(b.username || ""))
+    );
 
     function render(items) {
         if (count) count.textContent = `${items.length} players`;
@@ -801,29 +943,52 @@ async function renderPlayersList() {
             showEmptyState(
                 list,
                 "No players found",
-                "Try another search or create an account."
+                "Create an account to join the HLL community."
             );
             return;
         }
 
-        list.innerHTML = items.map((player, index) => `
-            <a class="ranking-item"
-               href="profile.html?id=${encodeURIComponent(player.id)}">
+        list.innerHTML = items.map((player, index) => {
+            const position = index + 1;
 
-                <span class="ranking-position">#${index + 1}</span>
+            let rankClass = "";
 
-                <span class="ranking-details">
-                    <strong>${escapeHTML(player.username || "Player")}</strong>
-                    <span>${player.completionCount} verified completions</span>
-                </span>
-            </a>
-        `).join("");
+            if (position === 1) rankClass = "rank-first";
+            else if (position === 2) rankClass = "rank-second";
+            else if (position === 3) rankClass = "rank-third";
+
+            return `
+                <a
+                    class="ranking-item hll-player-card"
+                    href="profile.html?id=${encodeURIComponent(player.id)}"
+                >
+                    <span class="ranking-position ${rankClass}">
+                        #${position}
+                    </span>
+
+                    <span class="ranking-details">
+                        <strong>${escapeHTML(player.username || "Player")}</strong>
+                        <span>
+                            ${player.completions}
+                            verified level${player.completions === 1 ? "" : "s"}
+                        </span>
+                    </span>
+
+                    <span class="hll-points-badge">
+                        <strong>${Number(player.points).toLocaleString()}</strong>
+                        <small>POINTS</small>
+                    </span>
+
+                    <span class="ranking-arrow" aria-hidden="true">›</span>
+                </a>
+            `;
+        }).join("");
     }
 
     render(players);
 
-    if (search && search.dataset.hllBound !== "true") {
-        search.dataset.hllBound = "true";
+    if (search && search.dataset.hllPlayersSearchBound !== "true") {
+        search.dataset.hllPlayersSearchBound = "true";
 
         search.addEventListener("input", () => {
             const term = search.value.trim().toLowerCase();
@@ -838,7 +1003,7 @@ async function renderPlayersList() {
 
 
 /* =========================================================
-   8. LEVEL SUBMISSIONS
+   10. LEVEL SUBMISSIONS
    ========================================================= */
 
 function setupLevelSubmission() {
@@ -866,20 +1031,12 @@ function setupLevelSubmission() {
         const reason = $("submission-reason")?.value.trim() || "";
 
         if (!name || !suggestedList) {
-            showMessage(
-                message,
-                "Enter the level name and select a list.",
-                "error"
-            );
+            showMessage(message, "Enter the level name and select a list.", "error");
             return;
         }
 
         if (!$("submission-confirm")?.checked) {
-            showMessage(
-                message,
-                "Please confirm that your submission is accurate.",
-                "error"
-            );
+            showMessage(message, "Please confirm that your submission is accurate.", "error");
             return;
         }
 
@@ -917,7 +1074,7 @@ function setupLevelSubmission() {
 
 
 /* =========================================================
-   9. COMPLETION SUBMISSIONS
+   11. COMPLETION SUBMISSIONS
    ========================================================= */
 
 async function populateCompletionLevels() {
@@ -975,20 +1132,12 @@ function setupCompletionSubmission() {
         }
 
         if (!validHttpUrl(evidenceUrl)) {
-            showMessage(
-                message,
-                "Enter a valid evidence URL.",
-                "error"
-            );
+            showMessage(message, "Enter a valid evidence URL.", "error");
             return;
         }
 
         if (!$("completion-confirm")?.checked) {
-            showMessage(
-                message,
-                "Please confirm that your evidence is genuine.",
-                "error"
-            );
+            showMessage(message, "Please confirm that your evidence is genuine.", "error");
             return;
         }
 
@@ -1013,7 +1162,7 @@ function setupCompletionSubmission() {
 
             showMessage(
                 message,
-                "Evidence submitted! Points only count after staff verification and points configuration.",
+                "Evidence submitted! Points only count after staff verification.",
                 "success"
             );
         } catch (error) {
@@ -1026,7 +1175,7 @@ function setupCompletionSubmission() {
 
 
 /* =========================================================
-   10. PLAYER PROFILE PAGE
+   12. PLAYER PROFILE
    ========================================================= */
 
 async function renderProfile() {
@@ -1062,15 +1211,8 @@ async function renderProfile() {
     const { data: profile, error } = await supabaseClient
         .from("profiles")
         .select(`
-            id,
-            username,
-            bio,
-            gd_username,
-            avatar_url,
-            created_at,
-            show_bio,
-            show_gd_username,
-            show_avatar
+            id, username, bio, gd_username, avatar_url, created_at,
+            show_bio, show_gd_username, show_avatar
         `)
         .eq("id", profileId)
         .maybeSingle();
@@ -1089,10 +1231,9 @@ async function renderProfile() {
     heading.textContent = profile.username || "Player";
 
     if (description) {
-        description.textContent =
-            profile.show_bio === false
-                ? "This player has hidden their biography."
-                : (profile.bio || "No biography yet.");
+        description.textContent = profile.show_bio === false
+            ? "This player has hidden their biography."
+            : (profile.bio || "No biography yet.");
     }
 
     const own = currentUser?.id === profile.id;
@@ -1139,9 +1280,7 @@ async function renderProfile() {
             .from("completions")
             .select("id, level_id, verified_at")
             .eq("user_id", profile.id)
-            .order("verified_at", {
-                ascending: false
-            });
+            .order("verified_at", { ascending: false });
 
     if (completionError) {
         showEmptyState(
@@ -1196,13 +1335,8 @@ async function renderProfile() {
         if (!level) return "";
 
         return `
-            <a class="ranking-item"
-               href="level.html?id=${encodeURIComponent(level.id)}">
-
-                <span class="ranking-position">
-                    #${escapeHTML(level.rank ?? "—")}
-                </span>
-
+            <a class="ranking-item" href="level.html?id=${encodeURIComponent(level.id)}">
+                <span class="ranking-position">#${escapeHTML(level.rank ?? "—")}</span>
                 <span class="ranking-details">
                     <strong>${escapeHTML(level.name || "Unnamed level")}</strong>
                     <span>Verified ${escapeHTML(formatDate(completion.verified_at))}</span>
@@ -1224,7 +1358,7 @@ async function renderProfile() {
 
 
 /* =========================================================
-   11. LEVEL DETAILS
+   13. LEVEL DETAILS
    ========================================================= */
 
 async function renderLevelDetail() {
@@ -1239,15 +1373,34 @@ async function renderLevelDetail() {
         return;
     }
 
-    const { data: level, error } = await supabaseClient
+    let { data: level, error } = await supabaseClient
         .from("levels")
         .select("*")
         .eq("id", id)
         .eq("status", "approved")
         .maybeSingle();
 
+    // If the points column is missing, retry with explicit fields.
+    if (
+        error &&
+        /points|column|schema cache/i.test(error.message || "")
+    ) {
+        const retry = await supabaseClient
+            .from("levels")
+            .select("id, name, level_id, creator, list_type, rank, description, status")
+            .eq("id", id)
+            .eq("status", "approved")
+            .maybeSingle();
+
+        level = retry.data;
+        error = retry.error;
+    }
+
     if (error || !level) {
         title.textContent = "Level not found";
+
+        if (error) console.error("Level detail loading failed:", error);
+
         return;
     }
 
@@ -1268,7 +1421,14 @@ async function renderLevelDetail() {
     }
 
     if ($("level-points")) {
-        $("level-points").textContent = "Not configured";
+        const points = calculateLevelPoints(
+            level.rank,
+            level.list_type,
+            level.points
+        );
+
+        $("level-points").textContent =
+            `${Number(points).toLocaleString()} points`;
     }
 
     if ($("level-detail-name")) {
@@ -1298,9 +1458,7 @@ async function renderLevelDetail() {
             .from("completions")
             .select("id, user_id, verified_at")
             .eq("level_id", level.id)
-            .order("verified_at", {
-                ascending: false
-            });
+            .order("verified_at", { ascending: false });
 
     if (completionError) {
         showEmptyState(
@@ -1348,16 +1506,12 @@ async function renderLevelDetail() {
     }
 
     const names = Object.fromEntries(
-        (profiles || []).map(profile => [
-            profile.id,
-            profile.username
-        ])
+        (profiles || []).map(profile => [profile.id, profile.username])
     );
 
     list.innerHTML = verified.map(completion => `
         <a class="ranking-item"
            href="profile.html?id=${encodeURIComponent(completion.user_id)}">
-
             <span class="ranking-details">
                 <strong>${escapeHTML(names[completion.user_id] || "Player")}</strong>
                 <span>Verified ${escapeHTML(formatDate(completion.verified_at))}</span>
@@ -1368,7 +1522,7 @@ async function renderLevelDetail() {
 
 
 /* =========================================================
-   12. ACCOUNT SETTINGS
+   14. ACCOUNT SETTINGS
    ========================================================= */
 
 async function setupSettings() {
@@ -1377,8 +1531,8 @@ async function setupSettings() {
     if (!form) return;
 
     const message = $("settings-message");
-
     const user = await requireLogin();
+
     if (!user) return;
 
     if ($("settings-current-email")) {
@@ -1447,7 +1601,7 @@ async function setupSettings() {
 
     form.dataset.hllSettingsBound = "true";
 
-    /* SAVE PROFILE */
+    // SAVE PROFILE
 
     form.addEventListener("submit", async event => {
         event.preventDefault();
@@ -1462,38 +1616,22 @@ async function setupSettings() {
         const avatar = $("settings-avatar")?.value.trim() || "";
 
         if (username.length < 3 || username.length > 24) {
-            showMessage(
-                message,
-                "Your username must be between 3 and 24 characters.",
-                "error"
-            );
+            showMessage(message, "Your username must be between 3 and 24 characters.", "error");
             return;
         }
 
         if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
-            showMessage(
-                message,
-                "Use only letters, numbers, underscores, and hyphens in your username.",
-                "error"
-            );
+            showMessage(message, "Use only letters, numbers, underscores, and hyphens in your username.", "error");
             return;
         }
 
         if (bio.length > 300 || gd.length > 40) {
-            showMessage(
-                message,
-                "Your bio must be 300 characters or less, and your GD username 40 characters or less.",
-                "error"
-            );
+            showMessage(message, "Your bio must be 300 characters or less, and your GD username 40 characters or less.", "error");
             return;
         }
 
         if (avatar && !validHttpUrl(avatar)) {
-            showMessage(
-                message,
-                "Enter a valid avatar URL beginning with https:// or http://.",
-                "error"
-            );
+            showMessage(message, "Enter a valid avatar URL beginning with https:// or http://.", "error");
             return;
         }
 
@@ -1514,16 +1652,9 @@ async function setupSettings() {
 
             if (error) throw error;
 
-            currentProfile = {
-                ...currentProfile,
-                ...data
-            };
+            currentProfile = { ...currentProfile, ...data };
 
-            showMessage(
-                message,
-                "Profile settings saved successfully!",
-                "success"
-            );
+            showMessage(message, "Profile settings saved successfully!", "success");
         } catch (error) {
             showMessage(message, getErrorMessage(error), "error");
         } finally {
@@ -1531,11 +1662,13 @@ async function setupSettings() {
         }
     });
 
-    /* CHANGE EMAIL */
+    // CHANGE EMAIL
 
     const emailForm = $("email-settings-form");
 
-    if (emailForm) {
+    if (emailForm && emailForm.dataset.hllBound !== "true") {
+        emailForm.dataset.hllBound = "true";
+
         emailForm.addEventListener("submit", async event => {
             event.preventDefault();
 
@@ -1551,25 +1684,19 @@ async function setupSettings() {
             }
 
             if (email.toLowerCase() === (user.email || "").toLowerCase()) {
-                showMessage(
-                    msg,
-                    "That is already your current email address.",
-                    "error"
-                );
+                showMessage(msg, "That is already your current email address.", "error");
                 return;
             }
 
             setLoading(button, true);
 
             try {
-                const redirectTo =
-                    new URL("login.html", location.href).href;
+                const redirectTo = new URL("login.html", location.href).href;
 
-                const { error } =
-                    await supabaseClient.auth.updateUser(
-                        { email },
-                        { emailRedirectTo: redirectTo }
-                    );
+                const { error } = await supabaseClient.auth.updateUser(
+                    { email },
+                    { emailRedirectTo: redirectTo }
+                );
 
                 if (error) throw error;
 
@@ -1588,11 +1715,13 @@ async function setupSettings() {
         });
     }
 
-    /* CHANGE PASSWORD */
+    // CHANGE PASSWORD
 
     const passwordForm = $("password-change-form");
 
-    if (passwordForm) {
+    if (passwordForm && passwordForm.dataset.hllBound !== "true") {
+        passwordForm.dataset.hllBound = "true";
+
         passwordForm.addEventListener("submit", async event => {
             event.preventDefault();
 
@@ -1600,20 +1729,16 @@ async function setupSettings() {
             const button = passwordForm.querySelector('[type="submit"]');
 
             const password = $("settings-new-password")?.value || "";
-            const confirm = $("settings-confirm-password")?.value || "";
+            const confirmPassword = $("settings-confirm-password")?.value || "";
 
             hideMessage(msg);
 
             if (password.length < 8) {
-                showMessage(
-                    msg,
-                    "Your password must contain at least 8 characters.",
-                    "error"
-                );
+                showMessage(msg, "Your password must contain at least 8 characters.", "error");
                 return;
             }
 
-            if (password !== confirm) {
+            if (password !== confirmPassword) {
                 showMessage(msg, "The passwords do not match.", "error");
                 return;
             }
@@ -1629,11 +1754,7 @@ async function setupSettings() {
 
                 passwordForm.reset();
 
-                showMessage(
-                    msg,
-                    "Your password has been updated successfully.",
-                    "success"
-                );
+                showMessage(msg, "Your password has been updated successfully.", "success");
             } catch (error) {
                 showMessage(msg, getErrorMessage(error), "error");
             } finally {
@@ -1642,30 +1763,27 @@ async function setupSettings() {
         });
     }
 
-    /* PASSWORD RECOVERY EMAIL */
+    // PASSWORD RECOVERY EMAIL
 
     const resetButton = $("password-reset-button");
 
-    if (resetButton) {
+    if (resetButton && resetButton.dataset.hllBound !== "true") {
+        resetButton.dataset.hllBound = "true";
+
         resetButton.addEventListener("click", async () => {
             const msg = $("password-reset-message");
 
             hideMessage(msg);
 
             if (!user.email) {
-                showMessage(
-                    msg,
-                    "No email address is associated with this account.",
-                    "error"
-                );
+                showMessage(msg, "No email address is associated with this account.", "error");
                 return;
             }
 
             setLoading(resetButton, true);
 
             try {
-                const redirectTo =
-                    new URL("login.html", location.href).href;
+                const redirectTo = new URL("login.html", location.href).href;
 
                 const { error } =
                     await supabaseClient.auth.resetPasswordForEmail(
@@ -1688,11 +1806,13 @@ async function setupSettings() {
         });
     }
 
-    /* PRIVACY SETTINGS */
+    // PRIVACY SETTINGS
 
     const privacyForm = $("privacy-settings-form");
 
-    if (privacyForm) {
+    if (privacyForm && privacyForm.dataset.hllBound !== "true") {
+        privacyForm.dataset.hllBound = "true";
+
         privacyForm.addEventListener("submit", async event => {
             event.preventDefault();
 
@@ -1705,8 +1825,7 @@ async function setupSettings() {
             try {
                 const preferences = {
                     show_bio: $("privacy-show-bio")?.checked ?? true,
-                    show_gd_username:
-                        $("privacy-show-gd-username")?.checked ?? true,
+                    show_gd_username: $("privacy-show-gd-username")?.checked ?? true,
                     show_avatar: $("privacy-show-avatar")?.checked ?? true
                 };
 
@@ -1719,16 +1838,9 @@ async function setupSettings() {
 
                 if (error) throw error;
 
-                currentProfile = {
-                    ...currentProfile,
-                    ...data
-                };
+                currentProfile = { ...currentProfile, ...data };
 
-                showMessage(
-                    msg,
-                    "Privacy preferences saved successfully!",
-                    "success"
-                );
+                showMessage(msg, "Privacy preferences saved successfully!", "success");
             } catch (error) {
                 showMessage(
                     msg,
@@ -1741,44 +1853,50 @@ async function setupSettings() {
         });
     }
 
-    /* LOG OUT */
+    // LOG OUT
 
     const logoutButton = $("logout-button");
 
-    if (logoutButton) {
+    if (logoutButton && logoutButton.dataset.hllSettingsLogoutBound !== "true") {
+        logoutButton.dataset.hllSettingsLogoutBound = "true";
+
         logoutButton.addEventListener("click", async event => {
             event.preventDefault();
 
-            if (!confirm("Are you sure you want to log out?")) return;
-
-            await logout();
+            if (confirm("Are you sure you want to log out?")) {
+                await logout();
+            }
         });
     }
 
-    /* DELETE ACCOUNT */
+    // DELETE ACCOUNT
+    // Deliberately disabled until secure server-side deletion exists.
 
     const deleteButton = $("delete-account-button");
 
     if (deleteButton) {
-        // Keep disabled until secure server-side deletion is deployed.
         deleteButton.disabled = true;
 
         deleteButton.title =
             "Account deletion is unavailable until a secure server endpoint is deployed.";
 
-        deleteButton.addEventListener("click", () => {
-            showMessage(
-                $("delete-account-message"),
-                "Account deletion is not enabled yet. A secure server-side Supabase Edge Function must be deployed first. No account data has been deleted.",
-                "error"
-            );
-        });
+        if (deleteButton.dataset.hllDeleteBound !== "true") {
+            deleteButton.dataset.hllDeleteBound = "true";
+
+            deleteButton.addEventListener("click", () => {
+                showMessage(
+                    $("delete-account-message"),
+                    "Account deletion is not enabled yet. A secure server-side Supabase Edge Function must be deployed first. No account data has been deleted.",
+                    "error"
+                );
+            });
+        }
     }
 }
 
 
 /* =========================================================
-   13. STAFF DASHBOARD
+   15. STAFF DASHBOARD
    ========================================================= */
 
 async function setupStaffDashboard() {
@@ -1839,7 +1957,7 @@ async function setupStaffDashboard() {
 
 
 /* =========================================================
-   14. START HLL
+   16. START HLL
    ========================================================= */
 
 async function startHLL() {
@@ -1919,8 +2037,7 @@ async function startHLL() {
             "HLL could not connect to Supabase. Check your internet connection and refresh.";
 
         if ($("settings-current-email")) {
-            $("settings-current-email").textContent =
-                "Could not load account";
+            $("settings-current-email").textContent = "Could not load account";
         }
 
         if ($("settings-message")) {
@@ -1938,989 +2055,3 @@ async function startHLL() {
 }
 
 document.addEventListener("DOMContentLoaded", startHLL);
-
-
-
-/* =========================================================
-   HLL RANKING UPGRADE
-   Automatic level points + competitive player leaderboard
-   ========================================================= */
-
-/*
-    POINTS SYSTEM
-
-    Main List:
-    #1   = 150 points
-    #150 = 1 point
-
-    Extended List:
-    #151 = 50 points
-    #350 = 1 point
-
-    Extended List points are distributed across 200 ranks.
-*/
-
-function calculateLevelPoints(rank, listType) {
-    const position = Number(rank);
-
-    if (!Number.isInteger(position)) {
-        return 0;
-    }
-
-    if (listType === "main") {
-        if (position < 1 || position > 150) {
-            return 0;
-        }
-
-        return 151 - position;
-    }
-
-    if (listType === "extended") {
-        if (position < 151 || position > 350) {
-            return 0;
-        }
-
-        return Math.floor(
-            ((350 - position) * 49) / 199
-        ) + 1;
-    }
-
-    return 0;
-}
-
-
-/* =========================================================
-   FANCY LEVEL LIST
-   Overrides the previous list renderer
-   ========================================================= */
-
-async function renderLevelList(listType) {
-    const list = $("ranking-list");
-    const count = $("list-count");
-    const search = $("level-search");
-
-    if (!list) return;
-
-    const isMain = listType === "main";
-
-    const minRank = isMain ? 1 : 151;
-    const maxRank = isMain ? 150 : 350;
-    const listName = isMain ? "Main List" : "Extended List";
-
-    showEmptyState(
-        list,
-        "Loading rankings...",
-        "Preparing the official HLL rankings."
-    );
-
-    if (count) {
-        count.textContent = "Loading rankings...";
-    }
-
-    const allLevels = await getApprovedLevels(listType);
-
-    if (allLevels === null) {
-        if (count) {
-            count.textContent = "Could not load rankings.";
-        }
-
-        return;
-    }
-
-    const levels = allLevels
-        .filter(level => {
-            const rank = Number(level.rank);
-
-            return Number.isInteger(rank) &&
-                rank >= minRank &&
-                rank <= maxRank;
-        })
-        .sort((a, b) => Number(a.rank) - Number(b.rank));
-
-    function render(items) {
-        if (count) {
-            count.textContent =
-                `${items.length} levels · Ranks #${minRank}–#${maxRank}`;
-        }
-
-        if (!items.length) {
-            showEmptyState(
-                list,
-                "No ranked levels yet",
-                `Approved ${listName} levels will appear here when they are added to HLL.`
-            );
-
-            return;
-        }
-
-        list.innerHTML = items.map(level => {
-            const rank = Number(level.rank);
-
-            const points = calculateLevelPoints(
-                rank,
-                level.list_type
-            );
-
-            let rankClass = "";
-
-            if (rank === 1) rankClass = "rank-first";
-            else if (rank === 2) rankClass = "rank-second";
-            else if (rank === 3) rankClass = "rank-third";
-
-            return `
-                <a
-                    class="ranking-item hll-level-card"
-                    href="level.html?id=${encodeURIComponent(level.id)}"
-                >
-                    <span class="ranking-position ${rankClass}">
-                        #${rank}
-                    </span>
-
-                    <span class="ranking-details">
-                        <strong>
-                            ${escapeHTML(level.name || "Unnamed level")}
-                        </strong>
-
-                        <span class="hll-level-meta">
-                            ${escapeHTML(level.creator || "Unknown creator")}
-                            ${
-                                level.level_id
-                                    ? ` · GD ID: ${escapeHTML(level.level_id)}`
-                                    : ""
-                            }
-                        </span>
-                    </span>
-
-                    <span class="hll-points-badge">
-                        <strong>${points}</strong>
-                        <small>POINTS</small>
-                    </span>
-
-                    <span class="ranking-arrow" aria-hidden="true">›</span>
-                </a>
-            `;
-        }).join("");
-    }
-
-    render(levels);
-
-    if (search && search.dataset.hllFancyBound !== "true") {
-        search.dataset.hllFancyBound = "true";
-
-        search.addEventListener("input", () => {
-            const term = search.value.trim().toLowerCase();
-
-            const filtered = levels.filter(level =>
-                String(level.name || "").toLowerCase().includes(term) ||
-                String(level.creator || "").toLowerCase().includes(term) ||
-                String(level.rank ?? "").includes(term) ||
-                String(level.level_id || "").toLowerCase().includes(term)
-            );
-
-            render(filtered);
-        });
-    }
-}
-
-
-/* =========================================================
-   PLAYER LEADERBOARD
-   Points come from verified completions
-   ========================================================= */
-
-async function renderPlayersList() {
-    const list = $("player-list");
-    const count = $("player-count");
-    const search = $("player-search");
-
-    if (!list) return;
-
-    showEmptyState(
-        list,
-        "Loading player rankings...",
-        "Calculating points from verified completions."
-    );
-
-    const [
-        profilesResult,
-        levelsResult,
-        completionsResult
-    ] = await Promise.all([
-        supabaseClient
-            .from("profiles")
-            .select("id, username, gd_username")
-            .order("username", { ascending: true }),
-
-        supabaseClient
-            .from("levels")
-            .select("id, rank, list_type, status")
-            .eq("status", "approved"),
-
-        supabaseClient
-            .from("completions")
-            .select("user_id, level_id")
-    ]);
-
-    if (profilesResult.error) {
-        showEmptyState(
-            list,
-            "Could not load players",
-            profilesResult.error.message
-        );
-
-        return;
-    }
-
-    if (levelsResult.error) {
-        showEmptyState(
-            list,
-            "Could not calculate points",
-            levelsResult.error.message
-        );
-
-        return;
-    }
-
-    if (completionsResult.error) {
-        showEmptyState(
-            list,
-            "Could not load verified completions",
-            completionsResult.error.message
-        );
-
-        return;
-    }
-
-    const levelPoints = new Map();
-
-    for (const level of levelsResult.data || []) {
-        const points = calculateLevelPoints(
-            level.rank,
-            level.list_type
-        );
-
-        if (points > 0) {
-            levelPoints.set(level.id, points);
-        }
-    }
-
-    const playerTotals = new Map();
-
-    for (const profile of profilesResult.data || []) {
-        playerTotals.set(profile.id, {
-            ...profile,
-            points: 0,
-            completions: 0
-        });
-    }
-
-    /*
-       A verified completion only counts when it references
-       an approved, ranked level.
-
-       Duplicate completion records for the same player and
-       level count only once.
-    */
-
-    const countedCompletions = new Set();
-
-    for (const completion of completionsResult.data || []) {
-        const player = playerTotals.get(completion.user_id);
-        const points = levelPoints.get(completion.level_id);
-
-        if (!player || !points) continue;
-
-        const uniqueKey =
-            `${completion.user_id}:${completion.level_id}`;
-
-        if (countedCompletions.has(uniqueKey)) continue;
-
-        countedCompletions.add(uniqueKey);
-
-        player.points += points;
-        player.completions += 1;
-    }
-
-    const players = [...playerTotals.values()].sort((a, b) =>
-        b.points - a.points ||
-        b.completions - a.completions ||
-        String(a.username || "").localeCompare(
-            String(b.username || "")
-        )
-    );
-
-    function render(items) {
-        if (count) {
-            count.textContent = `${items.length} players`;
-        }
-
-        if (!items.length) {
-            showEmptyState(
-                list,
-                "No players found",
-                "Create an account to join the HLL community."
-            );
-
-            return;
-        }
-
-        list.innerHTML = items.map((player, index) => {
-            const position = index + 1;
-
-            let rankClass = "";
-
-            if (position === 1) rankClass = "rank-first";
-            else if (position === 2) rankClass = "rank-second";
-            else if (position === 3) rankClass = "rank-third";
-
-            return `
-                <a
-                    class="ranking-item hll-player-card"
-                    href="profile.html?id=${encodeURIComponent(player.id)}"
-                >
-                    <span class="ranking-position ${rankClass}">
-                        #${position}
-                    </span>
-
-                    <span class="ranking-details">
-                        <strong>
-                            ${escapeHTML(player.username || "Player")}
-                        </strong>
-
-                        <span>
-                            ${player.completions} verified level${player.completions === 1 ? "" : "s"}
-                        </span>
-                    </span>
-
-                    <span class="hll-points-badge">
-                        <strong>${player.points.toLocaleString()}</strong>
-                        <small>POINTS</small>
-                    </span>
-
-                    <span class="ranking-arrow" aria-hidden="true">›</span>
-                </a>
-            `;
-        }).join("");
-    }
-
-    render(players);
-
-    if (search && search.dataset.hllPointsSearchBound !== "true") {
-        search.dataset.hllPointsSearchBound = "true";
-
-        search.addEventListener("input", () => {
-            const term = search.value.trim().toLowerCase();
-
-            render(players.filter(player =>
-                String(player.username || "").toLowerCase().includes(term) ||
-                String(player.gd_username || "").toLowerCase().includes(term)
-            ));
-        });
-    }
-}
-
-/* =========================================================
-   HLL — CUSTOM POINTS FIX
-   Reads editable points directly from Supabase.
-   Paste this entire block at the VERY BOTTOM of script.js.
-   ========================================================= */
-
-/*
-   Points rules:
-
-   1. Supabase levels.points is the source of truth.
-   2. Custom points such as 250 are displayed as 250.
-   3. Custom points are used in the player leaderboard.
-   4. Existing levels without configured points use the
-      original rank-based formula as a fallback.
-*/
-
-function calculateLevelPoints(rank, listType, customPoints) {
-    // Use the value configured in Supabase when available.
-    // Zero is a valid custom value.
-    if (
-        customPoints !== null &&
-        customPoints !== undefined &&
-        customPoints !== ""
-    ) {
-        const configuredPoints = Number(customPoints);
-
-        if (
-            Number.isFinite(configuredPoints) &&
-            configuredPoints >= 0
-        ) {
-            return configuredPoints;
-        }
-    }
-
-    // Fallback for levels without a configured points value.
-    const position = Number(rank);
-
-    if (!Number.isInteger(position)) {
-        return 0;
-    }
-
-    if (listType === "main") {
-        return position >= 1 && position <= 150
-            ? 151 - position
-            : 0;
-    }
-
-    if (listType === "extended") {
-        return position >= 151 && position <= 350
-            ? Math.floor(((350 - position) * 49) / 199) + 1
-            : 0;
-    }
-
-    return 0;
-}
-
-
-/* =========================================================
-   LOAD APPROVED LEVELS INCLUDING CUSTOM POINTS
-   ========================================================= */
-
-async function getApprovedLevels(listType = null) {
-    let query = supabaseClient
-        .from("levels")
-        .select(
-            "id, name, level_id, creator, list_type, rank, description, points"
-        )
-        .eq("status", "approved")
-        .order("rank", {
-            ascending: true
-        });
-
-    if (listType) {
-        query = query.eq("list_type", listType);
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-        console.error("Level loading failed:", error.message);
-
-        showEmptyState(
-            $("ranking-list"),
-            "Could not load levels",
-            "Check your Supabase levels table, points column, and read policies."
-        );
-
-        return null;
-    }
-
-    return data || [];
-}
-
-
-/* =========================================================
-   MAIN LIST + EXTENDED LIST
-   Displays the actual Supabase points value.
-   ========================================================= */
-
-async function renderLevelList(listType) {
-    const list = $("ranking-list");
-    const count = $("list-count");
-    const search = $("level-search");
-
-    if (!list) return;
-
-    const isMain = listType === "main";
-    const minRank = isMain ? 1 : 151;
-    const maxRank = isMain ? 150 : 350;
-    const listName = isMain ? "Main List" : "Extended List";
-
-    showEmptyState(
-        list,
-        "Loading rankings...",
-        "Loading levels and their configured points."
-    );
-
-    if (count) {
-        count.textContent = "Loading rankings...";
-    }
-
-    const allLevels = await getApprovedLevels(listType);
-
-    if (allLevels === null) {
-        if (count) {
-            count.textContent = "Could not load rankings.";
-        }
-
-        return;
-    }
-
-    const levels = allLevels
-        .filter(level => {
-            const rank = Number(level.rank);
-
-            return Number.isInteger(rank) &&
-                rank >= minRank &&
-                rank <= maxRank;
-        })
-        .sort((a, b) => Number(a.rank) - Number(b.rank));
-
-    function render(items) {
-        if (count) {
-            count.textContent =
-                `${items.length} levels · Ranks #${minRank}–#${maxRank}`;
-        }
-
-        if (!items.length) {
-            showEmptyState(
-                list,
-                "No ranked levels yet",
-                `No approved levels are currently available in the ${listName}.`
-            );
-
-            return;
-        }
-
-        list.innerHTML = items.map(level => {
-            const rank = Number(level.rank);
-
-            const points = calculateLevelPoints(
-                level.rank,
-                level.list_type,
-                level.points
-            );
-
-            let rankClass = "";
-
-            if (rank === 1) {
-                rankClass = "rank-first";
-            } else if (rank === 2) {
-                rankClass = "rank-second";
-            } else if (rank === 3) {
-                rankClass = "rank-third";
-            }
-
-            return `
-                <a
-                    class="ranking-item hll-level-card"
-                    href="level.html?id=${encodeURIComponent(level.id)}"
-                >
-                    <span class="ranking-position ${rankClass}">
-                        #${escapeHTML(rank)}
-                    </span>
-
-                    <span class="ranking-details">
-                        <strong>
-                            ${escapeHTML(level.name || "Unnamed level")}
-                        </strong>
-
-                        <span class="hll-level-meta">
-                            ${escapeHTML(level.creator || "Unknown creator")}
-                            ${
-                                level.level_id
-                                    ? ` · GD ID: ${escapeHTML(level.level_id)}`
-                                    : ""
-                            }
-                        </span>
-                    </span>
-
-                    <span class="hll-points-badge">
-                        <strong>${points.toLocaleString()}</strong>
-                        <small>POINTS</small>
-                    </span>
-
-                    <span class="ranking-arrow" aria-hidden="true">›</span>
-                </a>
-            `;
-        }).join("");
-    }
-
-    render(levels);
-
-    if (search && search.dataset.hllCustomPointsSearch !== "true") {
-        search.dataset.hllCustomPointsSearch = "true";
-
-        search.addEventListener("input", () => {
-            const term = search.value.trim().toLowerCase();
-
-            const filtered = levels.filter(level =>
-                String(level.name || "").toLowerCase().includes(term) ||
-                String(level.creator || "").toLowerCase().includes(term) ||
-                String(level.rank ?? "").includes(term) ||
-                String(level.level_id || "").toLowerCase().includes(term)
-            );
-
-            render(filtered);
-        });
-    }
-}
-
-
-/* =========================================================
-   PLAYER LEADERBOARD
-   Sums custom points from verified completions.
-   ========================================================= */
-
-async function renderPlayersList() {
-    const list = $("player-list");
-    const count = $("player-count");
-    const search = $("player-search");
-
-    if (!list) return;
-
-    showEmptyState(
-        list,
-        "Loading player rankings...",
-        "Calculating points from verified completions."
-    );
-
-    const [
-        profilesResult,
-        levelsResult,
-        completionsResult
-    ] = await Promise.all([
-        supabaseClient
-            .from("profiles")
-            .select("id, username, gd_username")
-            .order("username", {
-                ascending: true
-            }),
-
-        supabaseClient
-            .from("levels")
-            .select("id, rank, list_type, status, points")
-            .eq("status", "approved"),
-
-        supabaseClient
-            .from("completions")
-            .select("user_id, level_id")
-    ]);
-
-    if (profilesResult.error) {
-        showEmptyState(
-            list,
-            "Could not load players",
-            profilesResult.error.message
-        );
-
-        return;
-    }
-
-    if (levelsResult.error) {
-        showEmptyState(
-            list,
-            "Could not load level points",
-            levelsResult.error.message
-        );
-
-        return;
-    }
-
-    if (completionsResult.error) {
-        showEmptyState(
-            list,
-            "Could not load verified completions",
-            completionsResult.error.message
-        );
-
-        return;
-    }
-
-    // Map each approved level to its configured points.
-    const levelPoints = new Map();
-
-    for (const level of levelsResult.data || []) {
-        const points = calculateLevelPoints(
-            level.rank,
-            level.list_type,
-            level.points
-        );
-
-        if (points > 0) {
-            levelPoints.set(level.id, points);
-        }
-    }
-
-    // Initialize every player, including players with zero points.
-    const playerTotals = new Map();
-
-    for (const profile of profilesResult.data || []) {
-        playerTotals.set(profile.id, {
-            ...profile,
-            points: 0,
-            completions: 0
-        });
-    }
-
-    // Count each player's completion of a given level only once.
-    const countedCompletions = new Set();
-
-    for (const completion of completionsResult.data || []) {
-        const player = playerTotals.get(completion.user_id);
-        const points = levelPoints.get(completion.level_id);
-
-        if (!player || points === undefined || points <= 0) {
-            continue;
-        }
-
-        const uniqueKey =
-            `${completion.user_id}:${completion.level_id}`;
-
-        if (countedCompletions.has(uniqueKey)) {
-            continue;
-        }
-
-        countedCompletions.add(uniqueKey);
-
-        player.points += points;
-        player.completions += 1;
-    }
-
-    const players = [...playerTotals.values()].sort((a, b) =>
-        b.points - a.points ||
-        b.completions - a.completions ||
-        String(a.username || "").localeCompare(
-            String(b.username || "")
-        )
-    );
-
-    function render(items) {
-        if (count) {
-            count.textContent = `${items.length} players`;
-        }
-
-        if (!items.length) {
-            showEmptyState(
-                list,
-                "No players found",
-                "Create an account to join the HLL community."
-            );
-
-            return;
-        }
-
-        list.innerHTML = items.map((player, index) => {
-            const position = index + 1;
-
-            let rankClass = "";
-
-            if (position === 1) {
-                rankClass = "rank-first";
-            } else if (position === 2) {
-                rankClass = "rank-second";
-            } else if (position === 3) {
-                rankClass = "rank-third";
-            }
-
-            return `
-                <a
-                    class="ranking-item hll-player-card"
-                    href="profile.html?id=${encodeURIComponent(player.id)}"
-                >
-                    <span class="ranking-position ${rankClass}">
-                        #${position}
-                    </span>
-
-                    <span class="ranking-details">
-                        <strong>
-                            ${escapeHTML(player.username || "Player")}
-                        </strong>
-
-                        <span>
-                            ${player.completions}
-                            verified level${player.completions === 1 ? "" : "s"}
-                        </span>
-                    </span>
-
-                    <span class="hll-points-badge">
-                        <strong>${player.points.toLocaleString()}</strong>
-                        <small>POINTS</small>
-                    </span>
-
-                    <span class="ranking-arrow" aria-hidden="true">›</span>
-                </a>
-            `;
-        }).join("");
-    }
-
-    render(players);
-
-    if (search && search.dataset.hllCustomPointsSearch !== "true") {
-        search.dataset.hllCustomPointsSearch = "true";
-
-        search.addEventListener("input", () => {
-            const term = search.value.trim().toLowerCase();
-
-            render(players.filter(player =>
-                String(player.username || "").toLowerCase().includes(term) ||
-                String(player.gd_username || "").toLowerCase().includes(term)
-            ));
-        });
-    }
-}
-
-
-/* =========================================================
-   LEVEL DETAILS
-   Displays custom points on level.html.
-   ========================================================= */
-
-async function renderLevelDetail() {
-    const title = $("level-title");
-
-    if (!title) return;
-
-    const id = getQueryParameter("id");
-
-    if (!id) {
-        title.textContent = "Level not found";
-        return;
-    }
-
-    const { data: level, error } = await supabaseClient
-        .from("levels")
-        .select("*")
-        .eq("id", id)
-        .eq("status", "approved")
-        .maybeSingle();
-
-    if (error || !level) {
-        title.textContent = "Level not found";
-        return;
-    }
-
-    title.textContent = level.name || "Unnamed level";
-
-    if ($("level-list-type")) {
-        $("level-list-type").textContent =
-            level.list_type === "main"
-                ? "Main List"
-                : "Extended List";
-    }
-
-    if ($("level-description")) {
-        $("level-description").textContent =
-            level.description || "No description provided.";
-    }
-
-    if ($("level-rank")) {
-        $("level-rank").textContent = `#${level.rank ?? "—"}`;
-    }
-
-    if ($("level-points")) {
-        const points = calculateLevelPoints(
-            level.rank,
-            level.list_type,
-            level.points
-        );
-
-        $("level-points").textContent =
-            `${points.toLocaleString()} points`;
-    }
-
-    if ($("level-detail-name")) {
-        $("level-detail-name").textContent =
-            level.name || "Unnamed level";
-    }
-
-    if ($("level-creator")) {
-        $("level-creator").textContent =
-            level.creator || "Unknown";
-    }
-
-    if ($("level-id")) {
-        $("level-id").textContent =
-            level.level_id || "Not provided";
-    }
-
-    if ($("level-status")) {
-        $("level-status").textContent = "Approved";
-    }
-
-    if ($("level-completion-count")) {
-        $("level-completion-count").textContent = "Loading...";
-    }
-
-    const list = $("level-completions");
-
-    const { data: completions, error: completionError } =
-        await supabaseClient
-            .from("completions")
-            .select("id, user_id, verified_at")
-            .eq("level_id", level.id)
-            .order("verified_at", {
-                ascending: false
-            });
-
-    if (completionError) {
-        showEmptyState(
-            list,
-            "Could not load completions",
-            "Please try again later."
-        );
-
-        return;
-    }
-
-    const verified = completions || [];
-
-    if ($("level-completion-count")) {
-        $("level-completion-count").textContent =
-            String(verified.length);
-    }
-
-    if (!list) return;
-
-    if (!verified.length) {
-        showEmptyState(
-            list,
-            "No verified completions yet",
-            "Verified completions will appear here."
-        );
-
-        return;
-    }
-
-    const userIds = [
-        ...new Set(
-            verified.map(completion => completion.user_id)
-        )
-    ];
-
-    const { data: profiles, error: profileError } =
-        await supabaseClient
-            .from("profiles")
-            .select("id, username")
-            .in("id", userIds);
-
-    if (profileError) {
-        showEmptyState(
-            list,
-            "Could not load player names",
-            "Please try again later."
-        );
-
-        return;
-    }
-
-    const names = Object.fromEntries(
-        (profiles || []).map(profile => [
-            profile.id,
-            profile.username
-        ])
-    );
-
-    list.innerHTML = verified.map(completion => `
-        <a
-            class="ranking-item"
-            href="profile.html?id=${encodeURIComponent(completion.user_id)}"
-        >
-            <span class="ranking-details">
-                <strong>
-                    ${escapeHTML(names[completion.user_id] || "Player")}
-                </strong>
-
-                <span>
-                    Verified ${escapeHTML(formatDate(completion.verified_at))}
-                </span>
-            </span>
-        </a>
-    `).join("");
-}
-
-console.log("HLL custom points system loaded.");
