@@ -618,11 +618,10 @@ function calculateLevelPoints(rank, listType, customPoints = null) {
 async function getApprovedLevels(listType = null) {
     if (!supabaseClient) return null;
 
-    // First try to read the custom points column.
     let query = supabaseClient
         .from("levels")
         .select(
-            "id, name, level_id, creator, list_type, rank, description, points"
+            "id, name, level_id, creator, list_type, rank, description, points, banner_url"
         )
         .eq("status", "approved")
         .order("rank", { ascending: true });
@@ -633,7 +632,6 @@ async function getApprovedLevels(listType = null) {
 
     let { data, error } = await query;
 
-    // If the points column is missing, retry without it.
     if (
         error &&
         /points|column|schema cache/i.test(error.message || "")
@@ -641,7 +639,7 @@ async function getApprovedLevels(listType = null) {
         let fallback = supabaseClient
             .from("levels")
             .select(
-                "id, name, level_id, creator, list_type, rank, description"
+                "id, name, level_id, creator, list_type, rank, description, banner_url"
             )
             .eq("status", "approved")
             .order("rank", { ascending: true });
@@ -683,7 +681,108 @@ async function getApprovedLevels(listType = null) {
    8. MAIN LIST AND EXTENDED LIST
    ========================================================= */
 
+function ensureLevelBannerStyles() {
+    if (document.getElementById("hll-level-banner-styles")) return;
+
+    const style = document.createElement("style");
+    style.id = "hll-level-banner-styles";
+    style.textContent = `
+        .hll-level-card {
+            position: relative;
+            isolation: isolate;
+            overflow: hidden;
+        }
+
+        .hll-level-card::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            z-index: 0;
+            pointer-events: none;
+            background-image:
+                linear-gradient(
+                    90deg,
+                    rgba(13, 13, 15, 1) 0%,
+                    rgba(13, 13, 15, .97) 28%,
+                    rgba(13, 13, 15, .82) 48%,
+                    rgba(13, 13, 15, .35) 76%,
+                    rgba(13, 13, 15, .18) 100%
+                ),
+                var(--hll-banner-image, none);
+            background-position: center, right center;
+            background-size: cover, cover;
+            background-repeat: no-repeat;
+            opacity: .96;
+            transition: opacity .2s ease, transform .3s ease;
+        }
+
+        .hll-level-card > * {
+            position: relative;
+            z-index: 1;
+        }
+
+        .hll-level-card:hover::before {
+            opacity: 1;
+            transform: scale(1.02);
+        }
+
+        @media (max-width: 600px) {
+            .hll-level-card::before {
+                background-image:
+                    linear-gradient(
+                        90deg,
+                        rgba(13, 13, 15, 1) 0%,
+                        rgba(13, 13, 15, .96) 36%,
+                        rgba(13, 13, 15, .72) 68%,
+                        rgba(13, 13, 15, .3) 100%
+                    ),
+                    var(--hll-banner-image, none);
+            }
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+function applyLevelBannerImages(container, levels) {
+    if (!container) return;
+
+    const byId = new Map(levels.map(level => [String(level.id), level]));
+
+    container.querySelectorAll(".hll-level-card[data-level-id]").forEach(card => {
+        const level = byId.get(card.dataset.levelId);
+        if (!level || !level.banner_url) return;
+
+        try {
+            const imageURL = new URL(String(level.banner_url).trim());
+
+            if (
+                imageURL.protocol !== "https:" &&
+                imageURL.protocol !== "http:"
+            ) {
+                return;
+            }
+
+            const safeURL = imageURL.href
+                .replace(/\\/g, "\\\\")
+                .replace(/"/g, "\\\"");
+
+            card.style.setProperty(
+                "--hll-banner-image",
+                `url("${safeURL}")`
+            );
+        } catch (error) {
+            console.warn(
+                "Invalid banner URL for level:",
+                level.name,
+                error
+            );
+        }
+    });
+}
+
 async function renderLevelList(listType) {
+    ensureLevelBannerStyles();
+
     const list = $("ranking-list");
     const count = $("list-count");
     const search = $("level-search");
@@ -754,6 +853,7 @@ async function renderLevelList(listType) {
             return `
                 <a
                     class="ranking-item hll-level-card"
+                    data-level-id="${escapeHTML(level.id)}"
                     href="level.html?id=${encodeURIComponent(level.id)}"
                 >
                     <span class="ranking-position ${rankClass}">
@@ -780,6 +880,8 @@ async function renderLevelList(listType) {
                 </a>
             `;
         }).join("");
+
+        applyLevelBannerImages(list, items);
     }
 
     render(levels);
@@ -799,7 +901,6 @@ async function renderLevelList(listType) {
         });
     }
 }
-
 
 /* =========================================================
    9. PLAYER LEADERBOARD
@@ -909,7 +1010,6 @@ async function renderPlayersList() {
         });
     }
 
-    // Count each player's completion of a level only once.
     const countedCompletions = new Set();
 
     for (const completion of completionsResult.data || []) {
@@ -1356,7 +1456,6 @@ async function renderProfile() {
     }
 }
 
-
 /* =========================================================
    13. LEVEL DETAILS
    ========================================================= */
@@ -1380,7 +1479,6 @@ async function renderLevelDetail() {
         .eq("status", "approved")
         .maybeSingle();
 
-    // If the points column is missing, retry with explicit fields.
     if (
         error &&
         /points|column|schema cache/i.test(error.message || "")
@@ -1870,7 +1968,7 @@ async function setupSettings() {
     }
 
     // DELETE ACCOUNT
-    // Deliberately disabled until secure server-side deletion exists.
+    // Disabled until secure server-side deletion exists.
 
     const deleteButton = $("delete-account-button");
 
@@ -2055,261 +2153,3 @@ async function startHLL() {
 }
 
 document.addEventListener("DOMContentLoaded", startHLL);
-
-
-
-
-
-
-
-
-/* =========================================
-   HLL — LEVEL BANNER SYSTEM
-   Add this at the VERY BOTTOM of script.js
-   ========================================= */
-
-function ensureLevelBannerStyles() {
-    if (document.getElementById("hll-level-banner-styles")) return;
-
-    const style = document.createElement("style");
-    style.id = "hll-level-banner-styles";
-
-    style.textContent = `
-        .hll-banner-card {
-            position: relative;
-            isolation: isolate;
-            overflow: hidden;
-            min-height: 100px;
-            border-radius: 14px;
-            background: #0d0d0f;
-            transition: transform .2s ease;
-        }
-
-        .hll-banner-card::before {
-            content: "";
-            position: absolute;
-            inset: 0;
-            z-index: 0;
-            pointer-events: none;
-            background-image:
-                linear-gradient(
-                    90deg,
-                    #0d0d0f 0%,
-                    rgba(13,13,15,.97) 25%,
-                    rgba(13,13,15,.82) 42%,
-                    rgba(13,13,15,.35) 70%,
-                    rgba(13,13,15,.15) 100%
-                ),
-                var(--banner-image, none);
-            background-position: center, right center;
-            background-size: cover, cover;
-            background-repeat: no-repeat;
-            opacity: .95;
-            transition: opacity .25s ease, transform .4s ease;
-        }
-
-        .hll-banner-card .ranking-position,
-        .hll-banner-card .ranking-details,
-        .hll-banner-card .ranking-arrow {
-            position: relative;
-            z-index: 1;
-        }
-
-        .hll-banner-card .ranking-details strong {
-            color: #fff;
-        }
-
-        .hll-banner-card .ranking-details > span {
-            color: #b0b0b5;
-        }
-
-        .hll-banner-card:hover {
-            transform: translateY(-2px);
-        }
-
-        .hll-banner-card:hover::before {
-            opacity: 1;
-            transform: scale(1.025);
-        }
-
-        .hll-banner-card:focus-visible {
-            outline: 2px solid #fff;
-            outline-offset: 3px;
-        }
-
-        @media (max-width: 600px) {
-            .hll-banner-card {
-                min-height: 90px;
-                border-radius: 11px;
-            }
-
-            .hll-banner-card::before {
-                background-image:
-                    linear-gradient(
-                        90deg,
-                        #0d0d0f 0%,
-                        rgba(13,13,15,.95) 35%,
-                        rgba(13,13,15,.65) 65%,
-                        rgba(13,13,15,.25) 100%
-                    ),
-                    var(--banner-image, none);
-            }
-        }
-    `;
-
-    document.head.appendChild(style);
-}
-
-async function getApprovedLevels(listType = null) {
-    let query = supabaseClient
-        .from("levels")
-        .select(
-            "id, name, level_id, creator, list_type, rank, description, banner_url"
-        )
-        .eq("status", "approved")
-        .order("rank", { ascending: true });
-
-    if (listType) {
-        query = query.eq("list_type", listType);
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-        console.error("Level loading failed:", error.message);
-
-        showEmptyState(
-            document.getElementById("ranking-list"),
-            "Could not load levels",
-            "Please refresh. If the problem continues, check your Supabase configuration."
-        );
-
-        return null;
-    }
-
-    return data || [];
-}
-
-async function renderLevelList(listType) {
-    const list = document.getElementById("ranking-list");
-    const count = document.getElementById("list-count");
-    const search = document.getElementById("level-search");
-
-    if (!list) return;
-
-    ensureLevelBannerStyles();
-
-    showEmptyState(
-        list,
-        "Loading levels...",
-        "Fetching approved rankings from HLL."
-    );
-
-    const levels = await getApprovedLevels(listType);
-
-    if (levels === null) {
-        if (count) {
-            count.textContent = "Rankings could not be loaded.";
-        }
-
-        return;
-    }
-
-    function render(items) {
-        if (count) {
-            count.textContent =
-                `${items.length} level${items.length === 1 ? "" : "s"}`;
-        }
-
-        if (!items.length) {
-            showEmptyState(
-                list,
-                "No levels found",
-                "Approved levels for this list will appear here when added."
-            );
-
-            return;
-        }
-
-        list.innerHTML = items.map(level => `
-            <a
-                class="ranking-item hll-banner-card"
-                href="level.html?id=${encodeURIComponent(level.id)}"
-                data-level-id="${escapeHTML(level.id)}"
-            >
-                <span class="ranking-position">
-                    #${escapeHTML(level.rank ?? "—")}
-                </span>
-
-                <span class="ranking-details">
-                    <strong>
-                        ${escapeHTML(level.name || "Unnamed level")}
-                    </strong>
-
-                    <span>
-                        ${escapeHTML(level.creator || "Unknown creator")}
-                    </span>
-                </span>
-
-                <span class="ranking-arrow" aria-hidden="true">›</span>
-            </a>
-        `).join("");
-
-        list.querySelectorAll(".hll-banner-card[data-level-id]")
-            .forEach(card => {
-                const level = items.find(
-                    item => String(item.id) === card.dataset.levelId
-                );
-
-                if (!level || !level.banner_url) return;
-
-                try {
-                    const imageURL = new URL(level.banner_url);
-
-                    if (
-                        imageURL.protocol !== "https:" &&
-                        imageURL.protocol !== "http:"
-                    ) {
-                        return;
-                    }
-
-                    card.style.setProperty(
-                        "--banner-image",
-                        `url("${imageURL.href}")`
-                    );
-                } catch (error) {
-                    console.warn(
-                        "Invalid banner URL for level:",
-                        level.name,
-                        error
-                    );
-                }
-            });
-    }
-
-    render(levels);
-
-    if (search && search.dataset.hllBannerBound !== "true") {
-        search.dataset.hllBannerBound = "true";
-
-        search.addEventListener("input", () => {
-            const term = search.value.trim().toLowerCase();
-
-            render(
-                levels.filter(level =>
-                    String(level.name || "")
-                        .toLowerCase().includes(term) ||
-
-                    String(level.creator || "")
-                        .toLowerCase().includes(term) ||
-
-                    String(level.rank ?? "")
-                        .includes(term) ||
-
-                    String(level.level_id || "")
-                        .toLowerCase().includes(term)
-                )
-            );
-        });
-    }
-}
