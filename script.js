@@ -1936,3 +1936,383 @@ async function startHLL() {
 }
 
 document.addEventListener("DOMContentLoaded", startHLL);
+
+
+
+/* =========================================================
+   HLL RANKING UPGRADE
+   Automatic level points + competitive player leaderboard
+   ========================================================= */
+
+/*
+    POINTS SYSTEM
+
+    Main List:
+    #1   = 150 points
+    #150 = 1 point
+
+    Extended List:
+    #151 = 50 points
+    #350 = 1 point
+
+    Extended List points are distributed across 200 ranks.
+*/
+
+function calculateLevelPoints(rank, listType) {
+    const position = Number(rank);
+
+    if (!Number.isInteger(position)) {
+        return 0;
+    }
+
+    if (listType === "main") {
+        if (position < 1 || position > 150) {
+            return 0;
+        }
+
+        return 151 - position;
+    }
+
+    if (listType === "extended") {
+        if (position < 151 || position > 350) {
+            return 0;
+        }
+
+        return Math.floor(
+            ((350 - position) * 49) / 199
+        ) + 1;
+    }
+
+    return 0;
+}
+
+
+/* =========================================================
+   FANCY LEVEL LIST
+   Overrides the previous list renderer
+   ========================================================= */
+
+async function renderLevelList(listType) {
+    const list = $("ranking-list");
+    const count = $("list-count");
+    const search = $("level-search");
+
+    if (!list) return;
+
+    const isMain = listType === "main";
+
+    const minRank = isMain ? 1 : 151;
+    const maxRank = isMain ? 150 : 350;
+    const listName = isMain ? "Main List" : "Extended List";
+
+    showEmptyState(
+        list,
+        "Loading rankings...",
+        "Preparing the official HLL rankings."
+    );
+
+    if (count) {
+        count.textContent = "Loading rankings...";
+    }
+
+    const allLevels = await getApprovedLevels(listType);
+
+    if (allLevels === null) {
+        if (count) {
+            count.textContent = "Could not load rankings.";
+        }
+
+        return;
+    }
+
+    const levels = allLevels
+        .filter(level => {
+            const rank = Number(level.rank);
+
+            return Number.isInteger(rank) &&
+                rank >= minRank &&
+                rank <= maxRank;
+        })
+        .sort((a, b) => Number(a.rank) - Number(b.rank));
+
+    function render(items) {
+        if (count) {
+            count.textContent =
+                `${items.length} levels · Ranks #${minRank}–#${maxRank}`;
+        }
+
+        if (!items.length) {
+            showEmptyState(
+                list,
+                "No ranked levels yet",
+                `Approved ${listName} levels will appear here when they are added to HLL.`
+            );
+
+            return;
+        }
+
+        list.innerHTML = items.map(level => {
+            const rank = Number(level.rank);
+
+            const points = calculateLevelPoints(
+                rank,
+                level.list_type
+            );
+
+            let rankClass = "";
+
+            if (rank === 1) rankClass = "rank-first";
+            else if (rank === 2) rankClass = "rank-second";
+            else if (rank === 3) rankClass = "rank-third";
+
+            return `
+                <a
+                    class="ranking-item hll-level-card"
+                    href="level.html?id=${encodeURIComponent(level.id)}"
+                >
+                    <span class="ranking-position ${rankClass}">
+                        #${rank}
+                    </span>
+
+                    <span class="ranking-details">
+                        <strong>
+                            ${escapeHTML(level.name || "Unnamed level")}
+                        </strong>
+
+                        <span class="hll-level-meta">
+                            ${escapeHTML(level.creator || "Unknown creator")}
+                            ${
+                                level.level_id
+                                    ? ` · GD ID: ${escapeHTML(level.level_id)}`
+                                    : ""
+                            }
+                        </span>
+                    </span>
+
+                    <span class="hll-points-badge">
+                        <strong>${points}</strong>
+                        <small>POINTS</small>
+                    </span>
+
+                    <span class="ranking-arrow" aria-hidden="true">›</span>
+                </a>
+            `;
+        }).join("");
+    }
+
+    render(levels);
+
+    if (search && search.dataset.hllFancyBound !== "true") {
+        search.dataset.hllFancyBound = "true";
+
+        search.addEventListener("input", () => {
+            const term = search.value.trim().toLowerCase();
+
+            const filtered = levels.filter(level =>
+                String(level.name || "").toLowerCase().includes(term) ||
+                String(level.creator || "").toLowerCase().includes(term) ||
+                String(level.rank ?? "").includes(term) ||
+                String(level.level_id || "").toLowerCase().includes(term)
+            );
+
+            render(filtered);
+        });
+    }
+}
+
+
+/* =========================================================
+   PLAYER LEADERBOARD
+   Points come from verified completions
+   ========================================================= */
+
+async function renderPlayersList() {
+    const list = $("player-list");
+    const count = $("player-count");
+    const search = $("player-search");
+
+    if (!list) return;
+
+    showEmptyState(
+        list,
+        "Loading player rankings...",
+        "Calculating points from verified completions."
+    );
+
+    const [
+        profilesResult,
+        levelsResult,
+        completionsResult
+    ] = await Promise.all([
+        supabaseClient
+            .from("profiles")
+            .select("id, username, gd_username")
+            .order("username", { ascending: true }),
+
+        supabaseClient
+            .from("levels")
+            .select("id, rank, list_type, status")
+            .eq("status", "approved"),
+
+        supabaseClient
+            .from("completions")
+            .select("user_id, level_id")
+    ]);
+
+    if (profilesResult.error) {
+        showEmptyState(
+            list,
+            "Could not load players",
+            profilesResult.error.message
+        );
+
+        return;
+    }
+
+    if (levelsResult.error) {
+        showEmptyState(
+            list,
+            "Could not calculate points",
+            levelsResult.error.message
+        );
+
+        return;
+    }
+
+    if (completionsResult.error) {
+        showEmptyState(
+            list,
+            "Could not load verified completions",
+            completionsResult.error.message
+        );
+
+        return;
+    }
+
+    const levelPoints = new Map();
+
+    for (const level of levelsResult.data || []) {
+        const points = calculateLevelPoints(
+            level.rank,
+            level.list_type
+        );
+
+        if (points > 0) {
+            levelPoints.set(level.id, points);
+        }
+    }
+
+    const playerTotals = new Map();
+
+    for (const profile of profilesResult.data || []) {
+        playerTotals.set(profile.id, {
+            ...profile,
+            points: 0,
+            completions: 0
+        });
+    }
+
+    /*
+       A verified completion only counts when it references
+       an approved, ranked level.
+
+       Duplicate completion records for the same player and
+       level count only once.
+    */
+
+    const countedCompletions = new Set();
+
+    for (const completion of completionsResult.data || []) {
+        const player = playerTotals.get(completion.user_id);
+        const points = levelPoints.get(completion.level_id);
+
+        if (!player || !points) continue;
+
+        const uniqueKey =
+            `${completion.user_id}:${completion.level_id}`;
+
+        if (countedCompletions.has(uniqueKey)) continue;
+
+        countedCompletions.add(uniqueKey);
+
+        player.points += points;
+        player.completions += 1;
+    }
+
+    const players = [...playerTotals.values()].sort((a, b) =>
+        b.points - a.points ||
+        b.completions - a.completions ||
+        String(a.username || "").localeCompare(
+            String(b.username || "")
+        )
+    );
+
+    function render(items) {
+        if (count) {
+            count.textContent = `${items.length} players`;
+        }
+
+        if (!items.length) {
+            showEmptyState(
+                list,
+                "No players found",
+                "Create an account to join the HLL community."
+            );
+
+            return;
+        }
+
+        list.innerHTML = items.map((player, index) => {
+            const position = index + 1;
+
+            let rankClass = "";
+
+            if (position === 1) rankClass = "rank-first";
+            else if (position === 2) rankClass = "rank-second";
+            else if (position === 3) rankClass = "rank-third";
+
+            return `
+                <a
+                    class="ranking-item hll-player-card"
+                    href="profile.html?id=${encodeURIComponent(player.id)}"
+                >
+                    <span class="ranking-position ${rankClass}">
+                        #${position}
+                    </span>
+
+                    <span class="ranking-details">
+                        <strong>
+                            ${escapeHTML(player.username || "Player")}
+                        </strong>
+
+                        <span>
+                            ${player.completions} verified level${player.completions === 1 ? "" : "s"}
+                        </span>
+                    </span>
+
+                    <span class="hll-points-badge">
+                        <strong>${player.points.toLocaleString()}</strong>
+                        <small>POINTS</small>
+                    </span>
+
+                    <span class="ranking-arrow" aria-hidden="true">›</span>
+                </a>
+            `;
+        }).join("");
+    }
+
+    render(players);
+
+    if (search && search.dataset.hllPointsSearchBound !== "true") {
+        search.dataset.hllPointsSearchBound = "true";
+
+        search.addEventListener("input", () => {
+            const term = search.value.trim().toLowerCase();
+
+            render(players.filter(player =>
+                String(player.username || "").toLowerCase().includes(term) ||
+                String(player.gd_username || "").toLowerCase().includes(term)
+            ));
+        });
+    }
+}
