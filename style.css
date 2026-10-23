@@ -985,3 +985,339 @@ main {
         box-sizing: border-box;
     }
 }
+
+
+/* =========================================================
+   HLL — PREMIUM RANKING UI
+   Append to the bottom of style.css
+   ========================================================= */
+
+:root {
+    --hll-surface: #111318;
+    --hll-surface-raised: #171a21;
+    --hll-border: rgba(255, 255, 255, 0.08);
+    --hll-border-hover: rgba(255, 255, 255, 0.2);
+    --hll-muted: #9298a5;
+    --hll-text: #f5f6fa;
+    --hll-accent: #b9a5ff;
+}
+
+/* Main ranking container */
+
+.ranking-list {
+    display: grid;
+    gap: 12px;
+    margin-top: 22px;
+}
+
+/* Individual level and player cards */
+
+.ranking-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    min-width: 0;
+    padding: 18px 20px;
+    overflow: hidden;
+
+    color: var(--hll-text);
+    text-decoration: none;
+
+    background:
+        linear-gradient(
+            120deg,
+            rgba(255, 255, 255, 0.035),
+            transparent 65%
+        ),
+        var(--hll-surface);
+
+    border: 1px solid var(--hll-border);
+    border-radius: 16px;
+
+    transition:
+        transform 180ms ease,
+        border-color 180ms ease,
+        background 180ms ease,
+        box-shadow 180ms ease;
+}
+
+.ranking-item:hover {
+    transform: translateY(-3px);
+    border-color: var(--hll-border-hover);
+
+    background:
+        linear-gradient(
+            120deg,
+            rgba(185, 165, 255, 0.09),
+            transparent 70%
+        ),
+        var(--hll-surface-raised);
+
+    box-shadow: 0 12px 35px rgba(0, 0, 0, 0.22);
+}
+
+.ranking-item:focus-visible {
+    outline: 2px solid var(--hll-accent);
+    outline-offset: 3px;
+}
+
+/* Rank number */
+
+.ranking-position {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 62px;
+
+    min-height: 54px;
+    padding: 8px;
+
+    color: #d5d8e1;
+    background: #20232c;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 12px;
+
+    font-size: 17px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.6px;
+}
+
+/* Top three rank treatments */
+
+.ranking-position.rank-first {
+    color: #ffe5a1;
+    background: linear-gradient(145deg, #59471e, #282116);
+    border-color: rgba(255, 215, 128, 0.4);
+}
+
+.ranking-position.rank-second {
+    color: #e7eaf2;
+    background: linear-gradient(145deg, #414958, #242831);
+    border-color: rgba(225, 232, 245, 0.28);
+}
+
+.ranking-position.rank-third {
+    color: #ffc6a0;
+    background: linear-gradient(145deg, #593a2e, #29201e);
+    border-color: rgba(255, 176, 133, 0.28);
+}
+
+/* Level and player information */
+
+.ranking-details {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.ranking-details strong {
+    overflow: hidden;
+    color: var(--hll-text);
+
+    font-size: 16px;
+    font-weight: 750;
+    line-height: 1.35;
+
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ranking-details > span {
+    overflow: hidden;
+    color: var(--hll-muted);
+
+    font-size: 13px;
+    line-height: 1.5;
+
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hll-level-meta {
+    display: block;
+}
+
+/* Points badge */
+
+.hll-points-badge {
+    display: flex;
+    align-items: flex-end;
+    flex: 0 0 auto;
+    flex-direction: column;
+    gap: 3px;
+
+    min-width: 76px;
+    padding: 10px 12px;
+
+    background: rgba(185, 165, 255, 0.08);
+    border: 1px solid rgba(185, 165, 255, 0.16);
+    border-radius: 12px;
+}
+
+.hll-points-badge strong {
+    color: var(--hll-accent);
+
+    font-size: 20px;
+    font-weight: 850;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+}
+
+.hll-points-badge small {
+    color: #aaa0c9;
+
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 1.3px;
+}
+
+/* Right-side arrow */
+
+.ranking-arrow {
+    flex: 0 0 auto;
+    color: #737987;
+    font-size: 27px;
+    line-height: 1;
+
+    transition:
+        color 180ms ease,
+        transform 180ms ease;
+}
+
+.ranking-item:hover .ranking-arrow {
+    color: #ffffff;
+    transform: translateX(3px);
+}
+
+/* Search field */
+
+.search-input {
+    width: 100%;
+    min-height: 52px;
+    padding: 0 17px;
+
+    color: var(--hll-text);
+    background: var(--hll-surface);
+    border: 1px solid var(--hll-border);
+    border-radius: 13px;
+
+    font: inherit;
+
+    transition:
+        border-color 180ms ease,
+        box-shadow 180ms ease;
+}
+
+.search-input::placeholder {
+    color: #777e8c;
+}
+
+.search-input:focus {
+    border-color: rgba(185, 165, 255, 0.65);
+    outline: none;
+    box-shadow: 0 0 0 4px rgba(185, 165, 255, 0.08);
+}
+
+/* Results counter */
+
+.list-notice {
+    margin-top: 18px;
+    color: var(--hll-muted);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+/* Empty states */
+
+.empty-state {
+    padding: 36px 22px;
+    text-align: center;
+
+    background: var(--hll-surface);
+    border: 1px dashed rgba(255, 255, 255, 0.13);
+    border-radius: 16px;
+}
+
+.empty-state h3 {
+    margin: 0 0 10px;
+    color: var(--hll-text);
+    font-size: 19px;
+}
+
+.empty-state p {
+    max-width: 520px;
+    margin: 0 auto;
+
+    color: var(--hll-muted);
+    font-size: 14px;
+    line-height: 1.7;
+}
+
+/* Mobile layout */
+
+@media (max-width: 600px) {
+    .ranking-list {
+        gap: 9px;
+    }
+
+    .ranking-item {
+        gap: 11px;
+        padding: 12px;
+        border-radius: 13px;
+    }
+
+    .ranking-position {
+        flex-basis: 47px;
+        min-height: 46px;
+        padding: 5px;
+        border-radius: 10px;
+        font-size: 14px;
+    }
+
+    .ranking-details {
+        gap: 4px;
+    }
+
+    .ranking-details strong {
+        font-size: 14px;
+    }
+
+    .ranking-details > span {
+        font-size: 11px;
+    }
+
+    .hll-points-badge {
+        min-width: 59px;
+        padding: 8px;
+        border-radius: 9px;
+    }
+
+    .hll-points-badge strong {
+        font-size: 16px;
+    }
+
+    .hll-points-badge small {
+        font-size: 8px;
+    }
+
+    .ranking-arrow {
+        display: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ranking-item,
+    .ranking-arrow,
+    .search-input {
+        transition: none;
+    }
+
+    .ranking-item:hover {
+        transform: none;
+    }
+}
