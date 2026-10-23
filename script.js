@@ -70,7 +70,7 @@ function showEmptyState(element, title, description) {
     const paragraph = document.createElement("p");
     paragraph.textContent = description;
 
-    wrapper.append(heading, paragraph);
+    wrapper.replaceChildren(heading, paragraph);
     element.replaceChildren(wrapper);
 }
 
@@ -115,11 +115,17 @@ function setLoading(button, loading, fallback = "Submit") {
 function safeNextUrl(next) {
     if (!next) return "index.html";
 
-    if (next.startsWith("/") && !next.startsWith("//")) {
+    if (
+        next.startsWith("/") &&
+        !next.startsWith("//")
+    ) {
         return next;
     }
 
-    if (!next.includes(":") && !next.startsWith("//")) {
+    if (
+        !next.includes(":") &&
+        !next.startsWith("//")
+    ) {
         return next;
     }
 
@@ -217,7 +223,6 @@ async function loadCurrentUser() {
     if (error) {
         currentUser = null;
         currentProfile = null;
-
         return null;
     }
 
@@ -280,7 +285,6 @@ async function ensureProfile() {
         return created;
     }
 
-    // Another tab may have created the profile already.
     const retry = await supabaseClient
         .from("profiles")
         .select("*")
@@ -309,7 +313,6 @@ async function requireLogin() {
         );
 
         location.href = `login.html?next=${next}`;
-
         return null;
     }
 
@@ -450,13 +453,8 @@ function setupAuthTabs() {
         }
     }
 
-    loginTab?.addEventListener("click", () => {
-        setMode("login");
-    });
-
-    signupTab?.addEventListener("click", () => {
-        setMode("signup");
-    });
+    loginTab?.addEventListener("click", () => setMode("login"));
+    signupTab?.addEventListener("click", () => setMode("signup"));
 
     if (form && form.dataset.hllAuthBound !== "true") {
         form.dataset.hllAuthBound = "true";
@@ -479,7 +477,6 @@ function setupAuthTabs() {
                     "Enter your email and password.",
                     "error"
                 );
-
                 return;
             }
 
@@ -494,7 +491,6 @@ function setupAuthTabs() {
                         "Your username must be between 3 and 24 characters.",
                         "error"
                     );
-
                     return;
                 }
 
@@ -504,7 +500,6 @@ function setupAuthTabs() {
                         "Use only letters, numbers, underscores, and hyphens in your username.",
                         "error"
                     );
-
                     return;
                 }
 
@@ -514,7 +509,6 @@ function setupAuthTabs() {
                         "Your password must contain at least 8 characters.",
                         "error"
                     );
-
                     return;
                 }
             }
@@ -551,16 +545,13 @@ function setupAuthTabs() {
                                     onConflict: "id"
                                 });
 
-                        if (profileError) {
-                            throw profileError;
-                        }
+                        if (profileError) throw profileError;
 
                         await loadCurrentUser();
 
                         location.href = safeNextUrl(
                             getQueryParameter("next")
                         );
-
                         return;
                     }
 
@@ -587,7 +578,6 @@ function setupAuthTabs() {
                     location.href = safeNextUrl(
                         getQueryParameter("next")
                     );
-
                     return;
                 }
             } catch (error) {
@@ -628,15 +618,12 @@ async function getApprovedLevels(listType = null) {
     const { data, error } = await query;
 
     if (error) {
-        console.error(
-            "Level loading failed:",
-            error.message
-        );
+        console.error("Level loading failed:", error.message);
 
         showEmptyState(
             $("ranking-list"),
             "Could not load levels",
-            "Please refresh. If the problem continues, check the levels schema and Supabase read policies."
+            "Please refresh. If the problem continues, check the levels table and Supabase read policies."
         );
 
         return null;
@@ -652,35 +639,47 @@ async function renderLevelList(listType) {
 
     if (!list) return;
 
+    const isMainList = listType === "main";
+    const minRank = isMainList ? 1 : 151;
+    const maxRank = isMainList ? 150 : 350;
+    const listName = isMainList ? "Main List" : "Extended List";
+
     showEmptyState(
         list,
-        "Loading levels...",
-        "Fetching approved rankings from HLL."
+        "Loading rankings...",
+        `Fetching approved ${listName} levels from HLL.`
     );
 
-    const levels = await getApprovedLevels(listType);
+    if (count) count.textContent = "Loading rankings...";
 
-    if (levels === null) {
-        if (count) {
-            count.textContent = "Rankings could not be loaded.";
-        }
+    const allLevels = await getApprovedLevels(listType);
 
+    if (allLevels === null) {
+        if (count) count.textContent = "Rankings could not be loaded.";
         return;
     }
+
+    // Enforce the official rank range for this list.
+    const levels = allLevels.filter(level => {
+        const rank = Number(level.rank);
+
+        return Number.isInteger(rank) &&
+            rank >= minRank &&
+            rank <= maxRank;
+    });
 
     function render(items) {
         if (count) {
             count.textContent =
-                `${items.length} level${items.length === 1 ? "" : "s"}`;
+                `${items.length} ranked level${items.length === 1 ? "" : "s"} · Ranks #${minRank}–#${maxRank}`;
         }
 
         if (!items.length) {
             showEmptyState(
                 list,
-                "No levels found",
-                "Approved levels for this list will appear here when added."
+                "No ranked levels yet",
+                `No approved levels with ranks #${minRank}–#${maxRank} are available in the ${listName}.`
             );
-
             return;
         }
 
@@ -689,12 +688,15 @@ async function renderLevelList(listType) {
                href="level.html?id=${encodeURIComponent(level.id)}">
 
                 <span class="ranking-position">
-                    #${escapeHTML(level.rank ?? "—")}
+                    #${escapeHTML(level.rank)}
                 </span>
 
                 <span class="ranking-details">
                     <strong>${escapeHTML(level.name || "Unnamed level")}</strong>
-                    <span>${escapeHTML(level.creator || "Unknown creator")}</span>
+                    <span>
+                        ${escapeHTML(level.creator || "Unknown creator")}
+                        ${level.level_id ? ` · GD ID: ${escapeHTML(level.level_id)}` : ""}
+                    </span>
                 </span>
 
                 <span class="ranking-arrow" aria-hidden="true">›</span>
@@ -710,12 +712,14 @@ async function renderLevelList(listType) {
         search.addEventListener("input", () => {
             const term = search.value.trim().toLowerCase();
 
-            render(levels.filter(level =>
+            const filtered = levels.filter(level =>
                 String(level.name || "").toLowerCase().includes(term) ||
                 String(level.creator || "").toLowerCase().includes(term) ||
                 String(level.rank ?? "").includes(term) ||
                 String(level.level_id || "").toLowerCase().includes(term)
-            ));
+            );
+
+            render(filtered);
         });
     }
 }
@@ -753,7 +757,6 @@ async function renderPlayersList() {
             "Could not load players",
             "Please refresh and try again."
         );
-
         return;
     }
 
@@ -767,7 +770,6 @@ async function renderPlayersList() {
             "Could not load player statistics",
             "Please try again later."
         );
-
         return;
     }
 
@@ -791,9 +793,7 @@ async function renderPlayersList() {
         );
 
     function render(items) {
-        if (count) {
-            count.textContent = `${items.length} players`;
-        }
+        if (count) count.textContent = `${items.length} players`;
 
         if (!items.length) {
             showEmptyState(
@@ -801,7 +801,6 @@ async function renderPlayersList() {
                 "No players found",
                 "Try another search or create an account."
             );
-
             return;
         }
 
@@ -856,7 +855,6 @@ function setupLevelSubmission() {
         hideMessage(message);
 
         const user = await requireLogin();
-
         if (!user) return;
 
         const name = $("level-name")?.value.trim();
@@ -871,7 +869,6 @@ function setupLevelSubmission() {
                 "Enter the level name and select a list.",
                 "error"
             );
-
             return;
         }
 
@@ -881,7 +878,6 @@ function setupLevelSubmission() {
                 "Please confirm that your submission is accurate.",
                 "error"
             );
-
             return;
         }
 
@@ -910,11 +906,7 @@ function setupLevelSubmission() {
                 "success"
             );
         } catch (error) {
-            showMessage(
-                message,
-                getErrorMessage(error),
-                "error"
-            );
+            showMessage(message, getErrorMessage(error), "error");
         } finally {
             setLoading(button, false);
         }
@@ -936,7 +928,6 @@ async function populateCompletionLevels() {
     if (levels === null) {
         select.innerHTML =
             '<option value="">Could not load ranked levels</option>';
-
         return;
     }
 
@@ -944,16 +935,13 @@ async function populateCompletionLevels() {
         '<option value="">Choose a ranked level</option>' +
         levels.map(level => `
             <option value="${escapeHTML(level.id)}">
-                #${escapeHTML(level.rank ?? "—")} —
-                ${escapeHTML(level.name)}
+                #${escapeHTML(level.rank ?? "—")} — ${escapeHTML(level.name)}
             </option>
         `).join("");
 
     const requested = getQueryParameter("level");
 
-    if (requested) {
-        select.value = requested;
-    }
+    if (requested) select.value = requested;
 }
 
 function setupCompletionSubmission() {
@@ -972,7 +960,6 @@ function setupCompletionSubmission() {
         hideMessage(message);
 
         const user = await requireLogin();
-
         if (!user) return;
 
         const levelId = $("completion-level")?.value;
@@ -981,12 +968,7 @@ function setupCompletionSubmission() {
         const notes = $("completion-notes")?.value.trim() || "";
 
         if (!levelId || !gdUsername || !evidenceUrl) {
-            showMessage(
-                message,
-                "Complete all required fields.",
-                "error"
-            );
-
+            showMessage(message, "Complete all required fields.", "error");
             return;
         }
 
@@ -996,7 +978,6 @@ function setupCompletionSubmission() {
                 "Enter a valid evidence URL.",
                 "error"
             );
-
             return;
         }
 
@@ -1006,7 +987,6 @@ function setupCompletionSubmission() {
                 "Please confirm that your evidence is genuine.",
                 "error"
             );
-
             return;
         }
 
@@ -1027,7 +1007,6 @@ function setupCompletionSubmission() {
             if (error) throw error;
 
             form.reset();
-
             await populateCompletionLevels();
 
             showMessage(
@@ -1036,11 +1015,7 @@ function setupCompletionSubmission() {
                 "success"
             );
         } catch (error) {
-            showMessage(
-                message,
-                getErrorMessage(error),
-                "error"
-            );
+            showMessage(message, getErrorMessage(error), "error");
         } finally {
             setLoading(button, false);
         }
@@ -1063,26 +1038,19 @@ async function renderProfile() {
 
     if (!heading) return;
 
-    const profileId =
-        getQueryParameter("id") || currentUser?.id;
+    const profileId = getQueryParameter("id") || currentUser?.id;
 
     if (!profileId) {
         heading.textContent = "Player not found";
 
         if (description) {
-            description.textContent =
-                "Log in or select a player profile.";
+            description.textContent = "Log in or select a player profile.";
         }
 
         if (actions) {
             actions.innerHTML = `
-                <a class="button button-primary" href="login.html">
-                    Sign In
-                </a>
-
-                <a class="button button-secondary" href="players.html">
-                    Player Leaderboard
-                </a>
+                <a class="button button-primary" href="login.html">Sign In</a>
+                <a class="button button-secondary" href="players.html">Player Leaderboard</a>
             `;
         }
 
@@ -1130,23 +1098,14 @@ async function renderProfile() {
     if (actions) {
         actions.innerHTML = own
             ? `
-                <a class="button button-primary" href="settings.html">
-                    Edit profile
-                </a>
-
-                <a class="button button-secondary" href="completion.html">
-                    Submit a Completion
-                </a>
+                <a class="button button-primary" href="settings.html">Edit profile</a>
+                <a class="button button-secondary" href="completion.html">Submit a Completion</a>
             `
             : `
-                <a class="button button-secondary" href="players.html">
-                    Player Leaderboard
-                </a>
+                <a class="button button-secondary" href="players.html">Player Leaderboard</a>
             `;
     }
 
-    // Apply privacy preferences to profile fields if matching
-    // display elements exist on the page.
     if ($("profile-gd-username")) {
         $("profile-gd-username").textContent =
             profile.show_gd_username === false
@@ -1171,7 +1130,6 @@ async function renderProfile() {
     }
 
     if (rank) rank.textContent = "—";
-
     if (points) points.textContent = "Not configured";
 
     const { data: completions, error: completionError } =
@@ -1189,7 +1147,6 @@ async function renderProfile() {
             "Could not load completions",
             "Please try again later."
         );
-
         return;
     }
 
@@ -1207,7 +1164,6 @@ async function renderProfile() {
             "No verified completions",
             "Verified level completions will appear here."
         );
-
         return;
     }
 
@@ -1225,7 +1181,6 @@ async function renderProfile() {
             "Could not load level details",
             "Please try again later."
         );
-
         return;
     }
 
@@ -1248,10 +1203,7 @@ async function renderProfile() {
 
                 <span class="ranking-details">
                     <strong>${escapeHTML(level.name || "Unnamed level")}</strong>
-
-                    <span>
-                        Verified ${escapeHTML(formatDate(completion.verified_at))}
-                    </span>
+                    <span>Verified ${escapeHTML(formatDate(completion.verified_at))}</span>
                 </span>
             </a>
         `;
@@ -1301,9 +1253,7 @@ async function renderLevelDetail() {
 
     if ($("level-list-type")) {
         $("level-list-type").textContent =
-            level.list_type === "main"
-                ? "Main List"
-                : "Extended List";
+            level.list_type === "main" ? "Main List" : "Extended List";
     }
 
     if ($("level-description")) {
@@ -1320,18 +1270,15 @@ async function renderLevelDetail() {
     }
 
     if ($("level-detail-name")) {
-        $("level-detail-name").textContent =
-            level.name || "Unnamed level";
+        $("level-detail-name").textContent = level.name || "Unnamed level";
     }
 
     if ($("level-creator")) {
-        $("level-creator").textContent =
-            level.creator || "Unknown";
+        $("level-creator").textContent = level.creator || "Unknown";
     }
 
     if ($("level-id")) {
-        $("level-id").textContent =
-            level.level_id || "Not provided";
+        $("level-id").textContent = level.level_id || "Not provided";
     }
 
     if ($("level-status")) {
@@ -1359,15 +1306,13 @@ async function renderLevelDetail() {
             "Could not load completions",
             "Please try again later."
         );
-
         return;
     }
 
     const verified = completions || [];
 
     if ($("level-completion-count")) {
-        $("level-completion-count").textContent =
-            String(verified.length);
+        $("level-completion-count").textContent = String(verified.length);
     }
 
     if (!list) return;
@@ -1378,7 +1323,6 @@ async function renderLevelDetail() {
             "No verified completions yet",
             "Verified completions will appear here."
         );
-
         return;
     }
 
@@ -1398,7 +1342,6 @@ async function renderLevelDetail() {
             "Could not load player names",
             "Please try again later."
         );
-
         return;
     }
 
@@ -1414,13 +1357,8 @@ async function renderLevelDetail() {
            href="profile.html?id=${encodeURIComponent(completion.user_id)}">
 
             <span class="ranking-details">
-                <strong>
-                    ${escapeHTML(names[completion.user_id] || "Player")}
-                </strong>
-
-                <span>
-                    Verified ${escapeHTML(formatDate(completion.verified_at))}
-                </span>
+                <strong>${escapeHTML(names[completion.user_id] || "Player")}</strong>
+                <span>Verified ${escapeHTML(formatDate(completion.verified_at))}</span>
             </span>
         </a>
     `).join("");
@@ -1438,9 +1376,7 @@ async function setupSettings() {
 
     const message = $("settings-message");
 
-    // Require a valid authenticated account.
     const user = await requireLogin();
-
     if (!user) return;
 
     if ($("settings-current-email")) {
@@ -1458,12 +1394,7 @@ async function setupSettings() {
             .maybeSingle();
 
         if (result.error) {
-            showMessage(
-                message,
-                getErrorMessage(result.error),
-                "error"
-            );
-
+            showMessage(message, getErrorMessage(result.error), "error");
             return;
         }
 
@@ -1476,13 +1407,11 @@ async function setupSettings() {
             "Your profile could not be loaded. Please log out and back in.",
             "error"
         );
-
         return;
     }
 
     currentProfile = profile;
 
-    // Populate profile inputs.
     if ($("settings-username")) {
         $("settings-username").value = profile.username || "";
     }
@@ -1492,19 +1421,15 @@ async function setupSettings() {
     }
 
     if ($("settings-gd-username")) {
-        $("settings-gd-username").value =
-            profile.gd_username || "";
+        $("settings-gd-username").value = profile.gd_username || "";
     }
 
     if ($("settings-avatar")) {
-        $("settings-avatar").value =
-            profile.avatar_url || "";
+        $("settings-avatar").value = profile.avatar_url || "";
     }
 
-    // Populate privacy controls.
     if ($("privacy-show-bio")) {
-        $("privacy-show-bio").checked =
-            profile.show_bio !== false;
+        $("privacy-show-bio").checked = profile.show_bio !== false;
     }
 
     if ($("privacy-show-gd-username")) {
@@ -1513,21 +1438,14 @@ async function setupSettings() {
     }
 
     if ($("privacy-show-avatar")) {
-        $("privacy-show-avatar").checked =
-            profile.show_avatar !== false;
+        $("privacy-show-avatar").checked = profile.show_avatar !== false;
     }
 
-    // Prevent duplicate form event listeners.
-    if (form.dataset.hllSettingsBound === "true") {
-        return;
-    }
+    if (form.dataset.hllSettingsBound === "true") return;
 
     form.dataset.hllSettingsBound = "true";
 
-
-    /* -----------------------------------------
-       SAVE PROFILE
-       ----------------------------------------- */
+    /* SAVE PROFILE */
 
     form.addEventListener("submit", async event => {
         event.preventDefault();
@@ -1536,17 +1454,10 @@ async function setupSettings() {
 
         const button = form.querySelector('[type="submit"]');
 
-        const username =
-            $("settings-username")?.value.trim() || "";
-
-        const bio =
-            $("settings-bio")?.value.trim() || "";
-
-        const gd =
-            $("settings-gd-username")?.value.trim() || "";
-
-        const avatar =
-            $("settings-avatar")?.value.trim() || "";
+        const username = $("settings-username")?.value.trim() || "";
+        const bio = $("settings-bio")?.value.trim() || "";
+        const gd = $("settings-gd-username")?.value.trim() || "";
+        const avatar = $("settings-avatar")?.value.trim() || "";
 
         if (username.length < 3 || username.length > 24) {
             showMessage(
@@ -1554,7 +1465,6 @@ async function setupSettings() {
                 "Your username must be between 3 and 24 characters.",
                 "error"
             );
-
             return;
         }
 
@@ -1564,7 +1474,6 @@ async function setupSettings() {
                 "Use only letters, numbers, underscores, and hyphens in your username.",
                 "error"
             );
-
             return;
         }
 
@@ -1574,7 +1483,6 @@ async function setupSettings() {
                 "Your bio must be 300 characters or less, and your GD username 40 characters or less.",
                 "error"
             );
-
             return;
         }
 
@@ -1584,7 +1492,6 @@ async function setupSettings() {
                 "Enter a valid avatar URL beginning with https:// or http://.",
                 "error"
             );
-
             return;
         }
 
@@ -1616,20 +1523,13 @@ async function setupSettings() {
                 "success"
             );
         } catch (error) {
-            showMessage(
-                message,
-                getErrorMessage(error),
-                "error"
-            );
+            showMessage(message, getErrorMessage(error), "error");
         } finally {
             setLoading(button, false);
         }
     });
 
-
-    /* -----------------------------------------
-       CHANGE EMAIL
-       ----------------------------------------- */
+    /* CHANGE EMAIL */
 
     const emailForm = $("email-settings-form");
 
@@ -1638,34 +1538,22 @@ async function setupSettings() {
             event.preventDefault();
 
             const msg = $("email-settings-message");
-            const button =
-                emailForm.querySelector('[type="submit"]');
-
-            const email =
-                $("settings-new-email")?.value.trim() || "";
+            const button = emailForm.querySelector('[type="submit"]');
+            const email = $("settings-new-email")?.value.trim() || "";
 
             hideMessage(msg);
 
             if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-                showMessage(
-                    msg,
-                    "Enter a valid email address.",
-                    "error"
-                );
-
+                showMessage(msg, "Enter a valid email address.", "error");
                 return;
             }
 
-            if (
-                email.toLowerCase() ===
-                (user.email || "").toLowerCase()
-            ) {
+            if (email.toLowerCase() === (user.email || "").toLowerCase()) {
                 showMessage(
                     msg,
                     "That is already your current email address.",
                     "error"
                 );
-
                 return;
             }
 
@@ -1691,21 +1579,14 @@ async function setupSettings() {
                     "success"
                 );
             } catch (error) {
-                showMessage(
-                    msg,
-                    getErrorMessage(error),
-                    "error"
-                );
+                showMessage(msg, getErrorMessage(error), "error");
             } finally {
                 setLoading(button, false);
             }
         });
     }
 
-
-    /* -----------------------------------------
-       CHANGE PASSWORD
-       ----------------------------------------- */
+    /* CHANGE PASSWORD */
 
     const passwordForm = $("password-change-form");
 
@@ -1714,14 +1595,10 @@ async function setupSettings() {
             event.preventDefault();
 
             const msg = $("password-change-message");
-            const button =
-                passwordForm.querySelector('[type="submit"]');
+            const button = passwordForm.querySelector('[type="submit"]');
 
-            const password =
-                $("settings-new-password")?.value || "";
-
-            const confirm =
-                $("settings-confirm-password")?.value || "";
+            const password = $("settings-new-password")?.value || "";
+            const confirm = $("settings-confirm-password")?.value || "";
 
             hideMessage(msg);
 
@@ -1731,27 +1608,20 @@ async function setupSettings() {
                     "Your password must contain at least 8 characters.",
                     "error"
                 );
-
                 return;
             }
 
             if (password !== confirm) {
-                showMessage(
-                    msg,
-                    "The passwords do not match.",
-                    "error"
-                );
-
+                showMessage(msg, "The passwords do not match.", "error");
                 return;
             }
 
             setLoading(button, true);
 
             try {
-                const { error } =
-                    await supabaseClient.auth.updateUser({
-                        password
-                    });
+                const { error } = await supabaseClient.auth.updateUser({
+                    password
+                });
 
                 if (error) throw error;
 
@@ -1763,21 +1633,14 @@ async function setupSettings() {
                     "success"
                 );
             } catch (error) {
-                showMessage(
-                    msg,
-                    getErrorMessage(error),
-                    "error"
-                );
+                showMessage(msg, getErrorMessage(error), "error");
             } finally {
                 setLoading(button, false);
             }
         });
     }
 
-
-    /* -----------------------------------------
-       PASSWORD RECOVERY EMAIL
-       ----------------------------------------- */
+    /* PASSWORD RECOVERY EMAIL */
 
     const resetButton = $("password-reset-button");
 
@@ -1793,7 +1656,6 @@ async function setupSettings() {
                     "No email address is associated with this account.",
                     "error"
                 );
-
                 return;
             }
 
@@ -1817,21 +1679,14 @@ async function setupSettings() {
                     "success"
                 );
             } catch (error) {
-                showMessage(
-                    msg,
-                    getErrorMessage(error),
-                    "error"
-                );
+                showMessage(msg, getErrorMessage(error), "error");
             } finally {
                 setLoading(resetButton, false);
             }
         });
     }
 
-
-    /* -----------------------------------------
-       PRIVACY SETTINGS
-       ----------------------------------------- */
+    /* PRIVACY SETTINGS */
 
     const privacyForm = $("privacy-settings-form");
 
@@ -1840,31 +1695,25 @@ async function setupSettings() {
             event.preventDefault();
 
             const msg = $("privacy-settings-message");
-            const button =
-                privacyForm.querySelector('[type="submit"]');
+            const button = privacyForm.querySelector('[type="submit"]');
 
             hideMessage(msg);
             setLoading(button, true);
 
             try {
                 const preferences = {
-                    show_bio:
-                        $("privacy-show-bio")?.checked ?? true,
-
+                    show_bio: $("privacy-show-bio")?.checked ?? true,
                     show_gd_username:
                         $("privacy-show-gd-username")?.checked ?? true,
-
-                    show_avatar:
-                        $("privacy-show-avatar")?.checked ?? true
+                    show_avatar: $("privacy-show-avatar")?.checked ?? true
                 };
 
-                const { data, error } =
-                    await supabaseClient
-                        .from("profiles")
-                        .update(preferences)
-                        .eq("id", user.id)
-                        .select()
-                        .single();
+                const { data, error } = await supabaseClient
+                    .from("profiles")
+                    .update(preferences)
+                    .eq("id", user.id)
+                    .select()
+                    .single();
 
                 if (error) throw error;
 
@@ -1881,8 +1730,7 @@ async function setupSettings() {
             } catch (error) {
                 showMessage(
                     msg,
-                    "Could not save privacy settings: " +
-                        getErrorMessage(error),
+                    "Could not save privacy settings: " + getErrorMessage(error),
                     "error"
                 );
             } finally {
@@ -1891,10 +1739,7 @@ async function setupSettings() {
         });
     }
 
-
-    /* -----------------------------------------
-       LOG OUT
-       ----------------------------------------- */
+    /* LOG OUT */
 
     const logoutButton = $("logout-button");
 
@@ -1902,24 +1747,18 @@ async function setupSettings() {
         logoutButton.addEventListener("click", async event => {
             event.preventDefault();
 
-            if (!confirm("Are you sure you want to log out?")) {
-                return;
-            }
+            if (!confirm("Are you sure you want to log out?")) return;
 
             await logout();
         });
     }
 
-
-    /* -----------------------------------------
-       DELETE ACCOUNT
-       ----------------------------------------- */
+    /* DELETE ACCOUNT */
 
     const deleteButton = $("delete-account-button");
 
     if (deleteButton) {
-        // This must remain disabled until a secure server-side
-        // account deletion function has been deployed.
+        // Keep disabled until secure server-side deletion is deployed.
         deleteButton.disabled = true;
 
         deleteButton.title =
@@ -1946,7 +1785,6 @@ async function setupStaffDashboard() {
     if (!status) return;
 
     const user = await requireLogin();
-
     if (!user) return;
 
     const { data: staff, error } = await supabaseClient
@@ -1956,9 +1794,7 @@ async function setupStaffDashboard() {
         .maybeSingle();
 
     if (error || !staff) {
-        status.textContent =
-            "Access denied. This account is not staff.";
-
+        status.textContent = "Access denied. This account is not staff.";
         status.dataset.type = "error";
 
         showEmptyState(
@@ -1976,8 +1812,7 @@ async function setupStaffDashboard() {
         return;
     }
 
-    status.textContent =
-        `Staff access confirmed: ${staff.role}`;
+    status.textContent = `Staff access confirmed: ${staff.role}`;
 
     if ($("pending-level-count")) {
         $("pending-level-count").textContent = "—";
@@ -2059,7 +1894,6 @@ async function startHLL() {
                 break;
         }
 
-        // Support logout buttons on other pages, too.
         const logoutButton = $("logout-button");
 
         if (
@@ -2075,15 +1909,9 @@ async function startHLL() {
             });
         }
 
-        console.log(
-            "HLL initialized successfully:",
-            page
-        );
+        console.log("HLL initialized successfully:", page);
     } catch (error) {
-        console.error(
-            "HLL initialization failed:",
-            error
-        );
+        console.error("HLL initialization failed:", error);
 
         const message =
             "HLL could not connect to Supabase. Check your internet connection and refresh.";
@@ -2094,31 +1922,15 @@ async function startHLL() {
         }
 
         if ($("settings-message")) {
-            showMessage(
-                $("settings-message"),
-                getErrorMessage(error),
-                "error"
-            );
+            showMessage($("settings-message"), getErrorMessage(error), "error");
         } else if ($("auth-message")) {
-            showMessage(
-                $("auth-message"),
-                message,
-                "error"
-            );
+            showMessage($("auth-message"), message, "error");
         } else if ($("submission-message")) {
-            showMessage(
-                $("submission-message"),
-                message,
-                "error"
-            );
+            showMessage($("submission-message"), message, "error");
         } else if ($("list-count")) {
             $("list-count").textContent = message;
         } else if ($("ranking-list")) {
-            showEmptyState(
-                $("ranking-list"),
-                "Connection problem",
-                message
-            );
+            showEmptyState($("ranking-list"), "Connection problem", message);
         }
     }
 }
