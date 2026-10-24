@@ -2763,3 +2763,53 @@ window.addEventListener("load", async function () {
         console.error("[HLL HOTFIX] Level loading failed:", error);
     }
 });
+
+
+// HLL COMPLETION HOTFIX V2
+window.addEventListener("load", async () => {
+    const select = document.getElementById("completion-level");
+    if (!select) return;
+
+    let client = null;
+
+    for (let i = 0; i < 20; i++) {
+        client =
+            (typeof supabaseClient !== "undefined" && supabaseClient) ||
+            window.supabaseClient ||
+            window.hllSupabase ||
+            null;
+
+        if (client && typeof client.from === "function") break;
+        await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    if (!client || typeof client.from !== "function") {
+        console.error("[HLL V2] Supabase client unavailable.");
+        return;
+    }
+
+    try {
+        const { data, error } = await client
+            .from("levels")
+            .select("id, name, rank, status")
+            .eq("status", "approved")
+            .order("rank", { ascending: true });
+
+        if (error) throw error;
+
+        select.innerHTML = '<option value="">Choose a ranked level</option>';
+
+        (data || []).forEach(level => {
+            if (level.id == null) return;
+
+            const option = document.createElement("option");
+            option.value = String(level.id);
+            option.textContent = `#${level.rank ?? "—"} — ${level.name}`;
+            select.appendChild(option);
+        });
+
+        console.log("[HLL V2] Loaded", select.options.length - 1, "levels.");
+    } catch (error) {
+        console.error("[HLL V2] Failed to load levels:", error);
+    }
+});
