@@ -2813,3 +2813,158 @@ window.addEventListener("load", async () => {
         console.error("[HLL V2] Failed to load levels:", error);
     }
 });
+
+
+
+
+
+
+
+/* =========================================
+   HLL COMPLETION FIX
+   Paste at the very bottom of script.js
+   ========================================= */
+
+window.addEventListener("load", async () => {
+    const select = document.getElementById("completion-level");
+    const form = document.getElementById("completion-form");
+
+    if (!select || !form) return;
+
+    const client =
+        (typeof supabaseClient !== "undefined" && supabaseClient) ||
+        window.supabaseClient ||
+        window.hllSupabase;
+
+    if (!client || typeof client.from !== "function") {
+        console.error("[HLL Completion] Supabase client unavailable.");
+        return;
+    }
+
+    // Load approved levels using the real levels.id column.
+    try {
+        const { data: levels, error } = await client
+            .from("levels")
+            .select("id, name, rank, status")
+            .eq("status", "approved")
+            .order("rank", { ascending: true });
+
+        if (error) throw error;
+
+        select.innerHTML = '<option value="">Choose a ranked level</option>';
+
+        (levels || []).forEach(level => {
+            if (level.id == null) return;
+
+            const option = document.createElement("option");
+            option.value = String(level.id);
+            option.textContent =
+                `#${level.rank ?? "—"} — ${level.name ?? "Unnamed level"}`;
+
+            select.appendChild(option);
+        });
+
+        const requestedLevel = new URLSearchParams(location.search).get("level");
+        if (requestedLevel) select.value = requestedLevel;
+
+        console.log("[HLL Completion] Loaded", select.options.length - 1, "levels.");
+    } catch (error) {
+        console.error("[HLL Completion] Could not load levels:", error);
+        select.innerHTML = '<option value="">Could not load levels</option>';
+    }
+
+    // Replace the form submit handler to prevent duplicate submissions.
+    const replacementForm = form.cloneNode(true);
+    form.replaceWith(replacementForm);
+
+    replacementForm.addEventListener("submit", async event => {
+        event.preventDefault();
+
+        const message = document.getElementById("completion-message");
+        const showMessage = (text, success = false) => {
+            if (message) {
+                message.textContent = text;
+                message.style.color = success ? "#42d392" : "#ff6b6b";
+            } else {
+                alert(text);
+            }
+        };
+
+        try {
+            const { data: authData, error: authError } =
+                await client.auth.getUser();
+
+            if (authError) throw authError;
+
+            const user = authData?.user;
+            if (!user) {
+                showMessage("Please log in before submitting a completion.");
+                return;
+            }
+
+            const levelId = replacementForm.querySelector("#completion-level")?.value;
+            const gdUsername =
+                replacementForm.querySelector("#completion-gd-username")?.value.trim();
+            const evidenceUrl =
+                replacementForm.querySelector("#completion-evidence")?.value.trim();
+            const notes =
+                replacementForm.querySelector("#completion-notes")?.value.trim() || "";
+
+            if (!levelId || !gdUsername || !evidenceUrl) {
+                showMessage("Please complete all required fields.");
+                return;
+            }
+
+            // Never submit a level name as the database ID.
+            const { data: level, error: levelError } = await client
+                .from("levels")
+                .select("id, name")
+                .eq("id", levelId)
+                .maybeSingle();
+
+            if (levelError) throw levelError;
+
+            if (!level) {
+                showMessage("That level could not be found. Refresh and try again.");
+                return;
+            }
+
+            /*
+             * completion_submissions.level_id is UUID in your current schema,
+             * while levels.id may be a different type. Do not send a guessed
+             * or human-readable value into that UUID column.
+             */
+            const { error: insertError } = await client
+                .from("completion_submissions")
+                .insert({
+                    submitted_by: user.id,
+                    level_id: level.id,
+                    gd_username: gdUsername,
+                    evidence_url: evidenceUrl,
+                    notes: notes,
+                    status: "pending"
+                });
+
+            if (insertError) {
+                console.error("[HLL Completion] Database rejected submission:", insertError);
+
+                if (insertError.code === "22P02") {
+                    showMessage(
+                        "Database ID mismatch: completion_submissions.level_id expects a UUID, " +
+                        "but levels.id uses a different ID format. The database relationship must be fixed."
+                    );
+                } else {
+                    showMessage(insertError.message || "Could not submit completion.");
+                }
+                return;
+            }
+
+            replacementForm.reset();
+            showMessage("Completion submitted for staff review!", true);
+
+        } catch (error) {
+            console.error("[HLL Completion] Submission failed:", error);
+            showMessage(error.message || "An unexpected error occurred.");
+        }
+    });
+});
