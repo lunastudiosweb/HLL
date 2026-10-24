@@ -2706,3 +2706,50 @@ async function setupStaffDashboard() {
         }
     }
 }
+
+
+
+
+
+
+// HLL HOTFIX: Use level UUIDs in the completion dropdown
+(async function HLLCompletionUUIDFix() {
+    const select = document.getElementById("completion-level");
+    if (!select || typeof supabaseClient === "undefined") return;
+
+    try {
+        const { data: levels, error } = await supabaseClient
+            .from("levels")
+            .select("uuid, name, rank, status")
+            .eq("status", "approved")
+            .order("rank", { ascending: true });
+
+        if (error) throw error;
+
+        select.innerHTML = '<option value="">Choose a ranked level</option>';
+
+        (levels || []).forEach(level => {
+            if (!level.uuid) return;
+
+            const option = document.createElement("option");
+            option.value = level.uuid;
+            option.textContent = `#${level.rank ?? "—"} — ${level.name}`;
+            select.appendChild(option);
+        });
+
+        const requestedLevel = new URLSearchParams(location.search).get("level");
+        if (requestedLevel) {
+            const matchingOption = [...select.options].find(
+                option => option.value === requestedLevel
+                    || option.textContent.includes(requestedLevel)
+            );
+
+            if (matchingOption) select.value = matchingOption.value;
+        }
+
+        console.log("[HLL HOTFIX] Completion dropdown loaded with UUIDs.");
+    } catch (error) {
+        console.error("[HLL HOTFIX] Could not load levels:", error);
+    }
+})();
+
