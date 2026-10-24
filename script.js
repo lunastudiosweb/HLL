@@ -1,6 +1,6 @@
 /* =========================================================
    HLL — HARDEST LEVELS LIST
-   Complete consolidated JavaScript
+   Complete consolidated JavaScript (cleaned, no hotfix blocks)
    ========================================================= */
 
 "use strict";
@@ -22,8 +22,20 @@ let authListenerRegistered = false;
 
 const $ = id => document.getElementById(id);
 
-const pageName = () =>
-    location.pathname.split("/").pop() || "index.html";
+// Returns the first element that exists from a list of possible ids.
+const field = (...ids) => {
+    for (const id of ids) {
+        const element = document.getElementById(id);
+        if (element) return element;
+    }
+    return null;
+};
+
+// Works with /completion.html AND clean URLs like /completion or /completion/
+const pageName = () => {
+    const last = location.pathname.split("/").filter(Boolean).pop() || "index";
+    return last.replace(/\.html$/i, "") + ".html";
+};
 
 const getQueryParameter = name =>
     new URLSearchParams(location.search).get(name);
@@ -44,11 +56,18 @@ function escapeHTML(value) {
 }
 
 function showMessage(element, message, type = "info") {
-    if (!element) return;
+    if (!element) {
+        if (type === "error") alert(message);
+        return;
+    }
 
     element.textContent = message;
     element.dataset.type = type;
     element.hidden = false;
+    element.style.display = "";
+    element.style.color =
+        type === "error" ? "#ff6b6b" :
+        type === "success" ? "#42d392" : "";
 }
 
 function hideMessage(element) {
@@ -76,6 +95,36 @@ function showEmptyState(element, title, description) {
 
 function getErrorMessage(error) {
     return error?.message || "Something went wrong. Please try again.";
+}
+
+// Turns raw database errors into messages you can actually act on.
+function describeDbError(error) {
+    const code = error?.code || "";
+    const text = error?.message || "";
+
+    if (code === "42501" || /row-level security/i.test(text)) {
+        return "The database blocked this submission (row-level security). " +
+               "An INSERT policy is missing for this table.";
+    }
+
+    if (code === "22P02") {
+        return "Database type mismatch: a column expects a different ID " +
+               "format (for example UUID vs. number). Check the column types.";
+    }
+
+    if (code === "23503") {
+        return "The selected level no longer exists. Refresh the page and try again.";
+    }
+
+    if (code === "23505") {
+        return "You have already submitted this.";
+    }
+
+    if (code === "23502") {
+        return "A required database column was empty: " + text;
+    }
+
+    return getErrorMessage(error);
 }
 
 function formatDate(value) {
@@ -152,15 +201,11 @@ function loadSupabaseLibrary() {
         );
 
         if (existing) {
-            existing.addEventListener("load", resolve, {
-                once: true
-            });
+            existing.addEventListener("load", resolve, { once: true });
 
             existing.addEventListener("error", () => {
                 reject(new Error("Could not load Supabase."));
-            }, {
-                once: true
-            });
+            }, { once: true });
 
             return;
         }
@@ -171,7 +216,6 @@ function loadSupabaseLibrary() {
             "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";
 
         script.dataset.hllSupabase = "true";
-
         script.onload = resolve;
 
         script.onerror = () => {
@@ -489,9 +533,7 @@ function setupAuthTabs() {
                             email,
                             password,
                             options: {
-                                data: {
-                                    username: enteredUsername
-                                }
+                                data: { username: enteredUsername }
                             }
                         });
 
@@ -508,9 +550,7 @@ function setupAuthTabs() {
                                     username: enteredUsername,
                                     bio: "",
                                     gd_username: ""
-                                }, {
-                                    onConflict: "id"
-                                });
+                                }, { onConflict: "id" });
 
                         if (profileError) throw profileError;
 
@@ -902,6 +942,7 @@ async function renderLevelList(listType) {
     }
 }
 
+
 /* =========================================================
    9. PLAYER LEADERBOARD
    ========================================================= */
@@ -1124,18 +1165,21 @@ function setupLevelSubmission() {
         const user = await requireLogin();
         if (!user) return;
 
-        const name = $("level-name")?.value.trim();
-        const levelId = $("level-id")?.value.trim() || "";
-        const creator = $("level-creator")?.value.trim() || "";
-        const suggestedList = $("suggested-list")?.value;
-        const reason = $("submission-reason")?.value.trim() || "";
+        const name = field("level-name")?.value.trim();
+        const levelId = field("level-id")?.value.trim() || "";
+        const creator = field("level-creator")?.value.trim() || "";
+        const suggestedList = field("suggested-list")?.value;
+        const reason = field("submission-reason")?.value.trim() || "";
 
         if (!name || !suggestedList) {
             showMessage(message, "Enter the level name and select a list.", "error");
             return;
         }
 
-        if (!$("submission-confirm")?.checked) {
+        // Only enforce the checkbox if it actually exists on the page.
+        const confirmBox = $("submission-confirm");
+
+        if (confirmBox && !confirmBox.checked) {
             showMessage(message, "Please confirm that your submission is accurate.", "error");
             return;
         }
@@ -1148,8 +1192,8 @@ function setupLevelSubmission() {
                 .insert({
                     submitted_by: user.id,
                     name,
-                    level_id: levelId,
-                    creator,
+                    level_id: levelId || null,
+                    creator: creator || null,
                     suggested_list: suggestedList,
                     reason,
                     status: "pending"
@@ -1165,7 +1209,8 @@ function setupLevelSubmission() {
                 "success"
             );
         } catch (error) {
-            showMessage(message, getErrorMessage(error), "error");
+            console.error("Level submission failed:", error);
+            showMessage(message, describeDbError(error), "error");
         } finally {
             setLoading(button, false);
         }
@@ -1221,10 +1266,13 @@ function setupCompletionSubmission() {
         const user = await requireLogin();
         if (!user) return;
 
-        const levelId = $("completion-level")?.value;
-        const gdUsername = $("gd-username")?.value.trim();
-        const evidenceUrl = $("evidence-url")?.value.trim();
-        const notes = $("completion-notes")?.value.trim() || "";
+        // field() accepts either naming style, so it works with your HTML as-is.
+        const levelId = field("completion-level")?.value;
+        const gdUsername =
+            field("gd-username", "completion-gd-username")?.value.trim();
+        const evidenceUrl =
+            field("evidence-url", "completion-evidence")?.value.trim();
+        const notes = field("completion-notes")?.value.trim() || "";
 
         if (!levelId || !gdUsername || !evidenceUrl) {
             showMessage(message, "Complete all required fields.", "error");
@@ -1232,11 +1280,13 @@ function setupCompletionSubmission() {
         }
 
         if (!validHttpUrl(evidenceUrl)) {
-            showMessage(message, "Enter a valid evidence URL.", "error");
+            showMessage(message, "Enter a valid evidence URL (starting with https://).", "error");
             return;
         }
 
-        if (!$("completion-confirm")?.checked) {
+        const confirmBox = $("completion-confirm");
+
+        if (confirmBox && !confirmBox.checked) {
             showMessage(message, "Please confirm that your evidence is genuine.", "error");
             return;
         }
@@ -1266,7 +1316,8 @@ function setupCompletionSubmission() {
                 "success"
             );
         } catch (error) {
-            showMessage(message, getErrorMessage(error), "error");
+            console.error("Completion submission failed:", error);
+            showMessage(message, describeDbError(error), "error");
         } finally {
             setLoading(button, false);
         }
@@ -1455,6 +1506,7 @@ async function renderProfile() {
         );
     }
 }
+
 
 /* =========================================================
    13. LEVEL DETAILS
@@ -1994,63 +2046,341 @@ async function setupSettings() {
 
 
 /* =========================================================
-   15. STAFF DASHBOARD
+   15. STAFF DASHBOARD (LEVEL + COMPLETION REVIEW)
    ========================================================= */
 
 async function setupStaffDashboard() {
-    const status = $("staff-status");
+    const statusElement = $("staff-status");
+    const levelQueue = $("staff-level-queue");
+    const completionQueue = $("staff-completion-queue");
+    const pendingLevelCount = $("pending-level-count");
+    const pendingCompletionCount = $("pending-completion-count");
 
-    if (!status) return;
+    if (!levelQueue || !completionQueue) return;
 
-    const user = await requireLogin();
-    if (!user) return;
+    levelQueue.innerHTML = "<p>Loading level submissions...</p>";
+    completionQueue.innerHTML = "<p>Loading completion submissions...</p>";
 
-    const { data: staff, error } = await supabaseClient
-        .from("staff_members")
-        .select("user_id, role")
-        .eq("user_id", user.id)
-        .maybeSingle();
+    try {
+        const {
+            data: { user },
+            error: authError
+        } = await supabaseClient.auth.getUser();
 
-    if (error || !staff) {
-        status.textContent = "Access denied. This account is not staff.";
-        status.dataset.type = "error";
+        if (authError || !user) {
+            throw new Error("Please log in before opening the staff dashboard.");
+        }
 
-        showEmptyState(
-            $("staff-level-queue"),
-            "Access denied",
-            "Only authorized HLL staff can review submissions."
-        );
+        const { data: staff, error: staffError } = await supabaseClient
+            .from("staff_members")
+            .select("role")
+            .eq("user_id", user.id)
+            .maybeSingle();
 
-        showEmptyState(
-            $("staff-completion-queue"),
-            "Access denied",
-            "Only authorized HLL staff can review evidence."
-        );
+        if (staffError) throw staffError;
 
-        return;
+        if (!staff || !["admin", "moderator"].includes(staff.role)) {
+            throw new Error("Access denied. Staff authorization required.");
+        }
+
+        if (statusElement) {
+            statusElement.textContent = `Staff access confirmed: ${staff.role}`;
+        }
+
+        await Promise.all([
+            loadLevelSubmissionQueue(),
+            loadCompletionSubmissionQueue()
+        ]);
+    } catch (error) {
+        console.error("HLL staff dashboard error:", error);
+
+        if (statusElement) {
+            statusElement.textContent =
+                error.message || "Could not load the staff dashboard.";
+        }
+
+        if (pendingLevelCount) pendingLevelCount.textContent = "—";
+        if (pendingCompletionCount) pendingCompletionCount.textContent = "—";
+
+        levelQueue.innerHTML = "<p>Could not load level submissions.</p>";
+        completionQueue.innerHTML = "<p>Could not load completion submissions.</p>";
     }
 
-    status.textContent = `Staff access confirmed: ${staff.role}`;
+    async function loadLevelSubmissionQueue() {
+        const { data, error } = await supabaseClient
+            .from("level_submissions")
+            .select("*")
+            .eq("status", "pending")
+            .order("id", { ascending: true });
 
-    if ($("pending-level-count")) {
-        $("pending-level-count").textContent = "—";
+        if (error) throw error;
+
+        const submissions = data || [];
+
+        if (pendingLevelCount) {
+            pendingLevelCount.textContent = String(submissions.length);
+        }
+
+        if (!submissions.length) {
+            levelQueue.innerHTML = "<p>No pending level submissions.</p>";
+            return;
+        }
+
+        levelQueue.innerHTML = "";
+
+        submissions.forEach(submission => {
+            const card = document.createElement("article");
+            card.className = "staff-review-card";
+
+            const title = document.createElement("h3");
+            title.textContent = submission.name || "Untitled level";
+
+            const details = document.createElement("p");
+            details.textContent =
+                `Game Level ID: ${submission.level_id || "Not provided"} | ` +
+                `Creator: ${submission.creator || "Unknown"} | ` +
+                `List: ${submission.suggested_list || "Unknown"}`;
+
+            const reason = document.createElement("p");
+            reason.textContent =
+                `Reason: ${submission.reason || "No reason provided"}`;
+
+            const actions = document.createElement("div");
+            actions.className = "staff-review-actions";
+
+            const approveButton = document.createElement("button");
+            approveButton.type = "button";
+            approveButton.textContent = "Approve";
+            approveButton.className = "staff-approve-button";
+
+            const rejectButton = document.createElement("button");
+            rejectButton.type = "button";
+            rejectButton.textContent = "Reject";
+            rejectButton.className = "staff-reject-button";
+
+            approveButton.addEventListener("click", async () => {
+                const list = String(submission.suggested_list || "")
+                    .trim()
+                    .toLowerCase();
+
+                if (list !== "main" && list !== "extended") {
+                    alert("This submission has an invalid list type.");
+                    return;
+                }
+
+                const rankInput = prompt(
+                    list === "main"
+                        ? "Enter the Main List rank (1–150):"
+                        : "Enter the Extended List rank (151–350):"
+                );
+
+                if (rankInput === null) return;
+
+                const rank = Number(rankInput);
+
+                const validRank =
+                    Number.isInteger(rank) &&
+                    (list === "main"
+                        ? rank >= 1 && rank <= 150
+                        : rank >= 151 && rank <= 350);
+
+                if (!validRank) {
+                    alert("That rank is outside the allowed range for this list.");
+                    return;
+                }
+
+                if (!confirm(
+                    `Approve "${submission.name}" as ${list.toUpperCase()} rank #${rank}?`
+                )) {
+                    return;
+                }
+
+                approveButton.disabled = true;
+                rejectButton.disabled = true;
+                approveButton.textContent = "Approving...";
+
+                try {
+                    const { data, error } = await supabaseClient.rpc(
+                        "review_level_submission",
+                        {
+                            p_submission_id: submission.id,
+                            p_decision: "approved",
+                            p_rank: rank
+                        }
+                    );
+
+                    if (error) throw error;
+
+                    if (data && data.success === false) {
+                        throw new Error(data.message || "Approval failed.");
+                    }
+
+                    alert(
+                        `Level approved!\nRank: #${rank}` +
+                        (data?.points !== undefined ? `\nPoints: ${data.points}` : "")
+                    );
+
+                    await loadLevelSubmissionQueue();
+                } catch (error) {
+                    console.error("Level approval failed:", error);
+                    alert(error.message || "Could not approve this submission.");
+
+                    approveButton.disabled = false;
+                    rejectButton.disabled = false;
+                    approveButton.textContent = "Approve";
+                }
+            });
+
+            rejectButton.addEventListener("click", async () => {
+                if (!confirm(`Reject "${submission.name}"?`)) return;
+
+                approveButton.disabled = true;
+                rejectButton.disabled = true;
+                rejectButton.textContent = "Rejecting...";
+
+                try {
+                    const { error } = await supabaseClient.rpc(
+                        "review_level_submission",
+                        {
+                            p_submission_id: submission.id,
+                            p_decision: "rejected",
+                            p_rank: null
+                        }
+                    );
+
+                    if (error) throw error;
+
+                    alert("Submission rejected.");
+                    await loadLevelSubmissionQueue();
+                } catch (error) {
+                    console.error("Level rejection failed:", error);
+                    alert(error.message || "Could not reject this submission.");
+
+                    approveButton.disabled = false;
+                    rejectButton.disabled = false;
+                    rejectButton.textContent = "Reject";
+                }
+            });
+
+            actions.append(approveButton, rejectButton);
+            card.append(title, details, reason, actions);
+            levelQueue.appendChild(card);
+        });
     }
 
-    if ($("pending-completion-count")) {
-        $("pending-completion-count").textContent = "—";
+    async function loadCompletionSubmissionQueue() {
+        const { data, error } = await supabaseClient
+            .from("completion_submissions")
+            .select("*")
+            .eq("status", "pending")
+            .order("id", { ascending: true });
+
+        if (error) throw error;
+
+        const submissions = data || [];
+
+        if (pendingCompletionCount) {
+            pendingCompletionCount.textContent = String(submissions.length);
+        }
+
+        if (!submissions.length) {
+            completionQueue.innerHTML = "<p>No pending completion submissions.</p>";
+            return;
+        }
+
+        completionQueue.innerHTML = "";
+
+        for (const submission of submissions) {
+            const card = document.createElement("article");
+            card.className = "staff-review-card";
+
+            const title = document.createElement("h3");
+            title.textContent = "Completion submission";
+
+            const details = document.createElement("p");
+            details.textContent =
+                `Submission: ${submission.id} | ` +
+                `User: ${submission.submitted_by || "Unknown"} | ` +
+                `Level: ${submission.level_id || "Unknown"}`;
+
+            const username = document.createElement("p");
+            username.textContent =
+                `GD Username: ${submission.gd_username || "Not provided"}`;
+
+            const notes = document.createElement("p");
+            notes.textContent =
+                `Notes: ${submission.notes || "No notes provided"}`;
+
+            const actions = document.createElement("div");
+            actions.className = "staff-review-actions";
+
+            if (submission.evidence_url && validHttpUrl(submission.evidence_url)) {
+                const evidenceLink = document.createElement("a");
+                evidenceLink.href = submission.evidence_url;
+                evidenceLink.target = "_blank";
+                evidenceLink.rel = "noopener noreferrer";
+                evidenceLink.textContent = "View Evidence";
+                actions.appendChild(evidenceLink);
+            }
+
+            const approveButton = document.createElement("button");
+            approveButton.type = "button";
+            approveButton.textContent = "Approve";
+            approveButton.className = "staff-approve-button";
+
+            const rejectButton = document.createElement("button");
+            rejectButton.type = "button";
+            rejectButton.textContent = "Reject";
+            rejectButton.className = "staff-reject-button";
+
+            async function reviewCompletion(decision) {
+                approveButton.disabled = true;
+                rejectButton.disabled = true;
+
+                try {
+                    const { error } = await supabaseClient.rpc(
+                        "review_completion_submission",
+                        {
+                            p_submission_id: submission.id,
+                            p_decision: decision
+                        }
+                    );
+
+                    if (error) throw error;
+
+                    alert(
+                        decision === "approved"
+                            ? "Completion approved."
+                            : "Completion rejected."
+                    );
+
+                    await loadCompletionSubmissionQueue();
+                } catch (error) {
+                    console.error("Completion review failed:", error);
+                    alert(error.message || "Could not review this completion.");
+
+                    approveButton.disabled = false;
+                    rejectButton.disabled = false;
+                }
+            }
+
+            approveButton.addEventListener("click", () => {
+                if (confirm("Approve this completion?")) {
+                    reviewCompletion("approved");
+                }
+            });
+
+            rejectButton.addEventListener("click", () => {
+                if (confirm("Reject this completion?")) {
+                    reviewCompletion("rejected");
+                }
+            });
+
+            actions.append(approveButton, rejectButton);
+            card.append(title, details, username, notes, actions);
+            completionQueue.appendChild(card);
+        }
     }
-
-    showEmptyState(
-        $("staff-level-queue"),
-        "Review system not configured",
-        "Secure staff approval functions must be installed before this queue can be used."
-    );
-
-    showEmptyState(
-        $("staff-completion-queue"),
-        "Review system not configured",
-        "Secure evidence-verification functions must be installed before this queue can be used."
-    );
 }
 
 
@@ -2091,8 +2421,9 @@ async function startHLL() {
                 break;
 
             case "completion.html":
-                await populateCompletionLevels();
+                // Bind the form first so it works even if the level list is slow.
                 setupCompletionSubmission();
+                await populateCompletionLevels();
                 break;
 
             case "profile.html":
@@ -2144,6 +2475,8 @@ async function startHLL() {
             showMessage($("auth-message"), message, "error");
         } else if ($("submission-message")) {
             showMessage($("submission-message"), message, "error");
+        } else if ($("completion-message")) {
+            showMessage($("completion-message"), message, "error");
         } else if ($("list-count")) {
             $("list-count").textContent = message;
         } else if ($("ranking-list")) {
@@ -2153,862 +2486,3 @@ async function startHLL() {
 }
 
 document.addEventListener("DOMContentLoaded", startHLL);
-
-
-
-
-/* ============================================
-   HLL STAFF DASHBOARD — COMPLETION REVIEW
-   Paste at the VERY BOTTOM of script.js
-   ============================================ */
-
-async function setupStaffDashboard() {
-    const statusEl = document.getElementById("staff-status");
-    const pendingCompletionCount = document.getElementById("pending-completion-count");
-    const completionQueue = document.getElementById("staff-completion-queue");
-    const pendingLevelCount = document.getElementById("pending-level-count");
-    const levelQueue = document.getElementById("staff-level-queue");
-
-    if (!statusEl || !completionQueue) {
-        console.error("HLL Staff: Required dashboard elements were not found.");
-        return;
-    }
-
-    statusEl.textContent = "Checking staff permissions...";
-
-    try {
-        const {
-            data: { user },
-            error: authError
-        } = await supabaseClient.auth.getUser();
-
-        if (authError) throw authError;
-
-        if (!user) {
-            statusEl.textContent = "Please log in to access the staff dashboard.";
-            completionQueue.innerHTML = "<p>You must log in first.</p>";
-            return;
-        }
-
-        const { data: staff, error: staffError } = await supabaseClient
-            .from("staff_members")
-            .select("role")
-            .eq("user_id", user.id)
-            .maybeSingle();
-
-        if (staffError) throw staffError;
-
-        if (!staff || !["admin", "moderator"].includes(staff.role)) {
-            statusEl.textContent = "Access denied. Staff authorization required.";
-            completionQueue.innerHTML = "<p>You do not have permission to review submissions.</p>";
-
-            if (pendingCompletionCount) pendingCompletionCount.textContent = "—";
-            if (pendingLevelCount) pendingLevelCount.textContent = "—";
-            return;
-        }
-
-        statusEl.textContent = `Staff access confirmed: ${staff.role}`;
-
-        await loadPendingCompletions();
-
-        // Level submissions are not implemented by this review function yet.
-        if (pendingLevelCount) pendingLevelCount.textContent = "—";
-
-        if (levelQueue) {
-            levelQueue.innerHTML =
-                "<p>The level-submission review queue has not been connected yet.</p>";
-        }
-
-    } catch (error) {
-        console.error("HLL Staff Dashboard Error:", error);
-        statusEl.textContent =
-            "Dashboard error: " +
-            (typeof getErrorMessage === "function"
-                ? getErrorMessage(error)
-                : error.message || "Unknown error");
-    }
-
-    async function loadPendingCompletions() {
-        completionQueue.innerHTML = "<p>Loading pending completions...</p>";
-
-        const { data: submissions, error } = await supabaseClient
-            .from("completion_submissions")
-            .select("*")
-            .eq("status", "pending")
-            .order("id", { ascending: true });
-
-        if (error) throw error;
-
-        const pending = submissions || [];
-
-        if (pendingCompletionCount) {
-            pendingCompletionCount.textContent = String(pending.length);
-        }
-
-        if (pending.length === 0) {
-            completionQueue.innerHTML = "<p>No pending completion submissions.</p>";
-            return;
-        }
-
-        completionQueue.innerHTML = "";
-
-        for (const submission of pending) {
-            const card = document.createElement("article");
-            card.className = "staff-submission-card";
-
-            const title = document.createElement("h3");
-            title.textContent = "Completion Submission";
-
-            const details = document.createElement("p");
-            details.textContent =
-                `Submission ID: ${submission.id}\n` +
-                `User ID: ${submission.submitted_by || "Unknown"}\n` +
-                `Level ID: ${submission.level_id || "Unknown"}\n` +
-                `Geometry Dash Username: ${submission.gd_username || "Not provided"}\n` +
-                `Notes: ${submission.notes || "None"}`;
-
-            details.style.whiteSpace = "pre-line";
-
-            card.appendChild(title);
-            card.appendChild(details);
-
-            if (submission.evidence_url) {
-                const evidence = document.createElement("a");
-                evidence.href = submission.evidence_url;
-                evidence.target = "_blank";
-                evidence.rel = "noopener noreferrer";
-                evidence.textContent = "View Evidence";
-                evidence.className = "button";
-                card.appendChild(evidence);
-            }
-
-            const actions = document.createElement("div");
-            actions.className = "staff-submission-actions";
-
-            const approveButton = document.createElement("button");
-            approveButton.type = "button";
-            approveButton.textContent = "Approve";
-            approveButton.className = "button approve-button";
-
-            const rejectButton = document.createElement("button");
-            rejectButton.type = "button";
-            rejectButton.textContent = "Reject";
-            rejectButton.className = "button reject-button";
-
-            approveButton.addEventListener("click", () => {
-                reviewSubmission(submission.id, "approved", card);
-            });
-
-            rejectButton.addEventListener("click", () => {
-                reviewSubmission(submission.id, "rejected", card);
-            });
-
-            actions.appendChild(approveButton);
-            actions.appendChild(rejectButton);
-            card.appendChild(actions);
-            completionQueue.appendChild(card);
-        }
-    }
-
-    async function reviewSubmission(submissionId, decision, card) {
-        const confirmed = confirm(
-            `Are you sure you want to ${decision === "approved" ? "APPROVE" : "REJECT"} this completion submission?`
-        );
-
-        if (!confirmed) return;
-
-        const buttons = card.querySelectorAll("button");
-        buttons.forEach(button => button.disabled = true);
-
-        try {
-            const { data, error } = await supabaseClient.rpc(
-                "review_completion_submission",
-                {
-                    p_submission_id: submissionId,
-                    p_decision: decision
-                }
-            );
-
-            if (error) throw error;
-
-            if (!data || data.success !== true) {
-                throw new Error("The review operation did not confirm success.");
-            }
-
-            card.innerHTML = `<p>Submission ${decision} successfully.</p>`;
-
-            await loadPendingCompletions();
-
-        } catch (error) {
-            console.error("HLL Review Error:", error);
-
-            alert(
-                "Could not review this submission:\n" +
-                (typeof getErrorMessage === "function"
-                    ? getErrorMessage(error)
-                    : error.message || "Unknown error")
-            );
-
-            buttons.forEach(button => button.disabled = false);
-        }
-    }
-}
-
-
-
-/* =========================================
-   HLL STAFF DASHBOARD
-   LEVEL + COMPLETION REVIEW
-   ========================================= */
-
-async function setupStaffDashboard() {
-    const statusElement = document.getElementById("staff-status");
-    const levelQueue = document.getElementById("staff-level-queue");
-    const completionQueue = document.getElementById("staff-completion-queue");
-    const pendingLevelCount = document.getElementById("pending-level-count");
-    const pendingCompletionCount = document.getElementById("pending-completion-count");
-
-    if (!levelQueue || !completionQueue) {
-        return;
-    }
-
-    levelQueue.innerHTML = "<p>Loading level submissions...</p>";
-    completionQueue.innerHTML = "<p>Loading completion submissions...</p>";
-
-    try {
-        const {
-            data: { user },
-            error: authError
-        } = await supabaseClient.auth.getUser();
-
-        if (authError || !user) {
-            throw new Error("Please log in before opening the staff dashboard.");
-        }
-
-        const { data: staff, error: staffError } = await supabaseClient
-            .from("staff_members")
-            .select("role")
-            .eq("user_id", user.id)
-            .maybeSingle();
-
-        if (staffError) {
-            throw staffError;
-        }
-
-        if (!staff || !["admin", "moderator"].includes(staff.role)) {
-            throw new Error("You do not have permission to access the staff dashboard.");
-        }
-
-        if (statusElement) {
-            statusElement.textContent = `Signed in as staff (${staff.role}).`;
-        }
-
-        await Promise.all([
-            loadLevelSubmissionQueue(),
-            loadCompletionSubmissionQueue()
-        ]);
-
-    } catch (error) {
-        console.error("HLL staff dashboard error:", error);
-
-        if (statusElement) {
-            statusElement.textContent = error.message || "Could not load the staff dashboard.";
-        }
-
-        levelQueue.innerHTML = "<p>Could not load level submissions.</p>";
-        completionQueue.innerHTML = "<p>Could not load completion submissions.</p>";
-    }
-
-    async function loadLevelSubmissionQueue() {
-        const { data: submissions, error } = await supabaseClient
-            .from("level_submissions")
-            .select("*")
-            .eq("status", "pending")
-            .order("id", { ascending: true });
-
-        if (error) {
-            throw error;
-        }
-
-        if (pendingLevelCount) {
-            pendingLevelCount.textContent = submissions.length;
-        }
-
-        if (!submissions.length) {
-            levelQueue.innerHTML = "<p>No pending level submissions.</p>";
-            return;
-        }
-
-        levelQueue.innerHTML = "";
-
-        submissions.forEach((submission) => {
-            const card = document.createElement("article");
-            card.className = "staff-review-card";
-
-            const title = document.createElement("h3");
-            title.textContent = submission.name || "Untitled level";
-
-            const details = document.createElement("p");
-            details.textContent =
-                `Game Level ID: ${submission.level_id || "Not provided"} | ` +
-                `Creator: ${submission.creator || "Unknown"} | ` +
-                `List: ${submission.suggested_list || "Unknown"}`;
-
-            const reason = document.createElement("p");
-            reason.textContent = `Reason: ${submission.reason || "No reason provided"}`;
-
-            const actions = document.createElement("div");
-            actions.className = "staff-review-actions";
-
-            const approveButton = document.createElement("button");
-            approveButton.type = "button";
-            approveButton.textContent = "Approve";
-            approveButton.className = "staff-approve-button";
-
-            const rejectButton = document.createElement("button");
-            rejectButton.type = "button";
-            rejectButton.textContent = "Reject";
-            rejectButton.className = "staff-reject-button";
-
-            approveButton.addEventListener("click", async () => {
-                const list = String(submission.suggested_list || "")
-                    .trim()
-                    .toLowerCase();
-
-                if (list !== "main" && list !== "extended") {
-                    alert("This submission has an invalid list type.");
-                    return;
-                }
-
-                const rankPrompt = list === "main"
-                    ? "Enter the Main List rank (1–150):"
-                    : "Enter the Extended List rank (151–350):";
-
-                const rankInput = prompt(rankPrompt);
-
-                if (rankInput === null) {
-                    return;
-                }
-
-                const rank = Number(rankInput);
-
-                const validRank =
-                    Number.isInteger(rank) &&
-                    (list === "main"
-                        ? rank >= 1 && rank <= 150
-                        : rank >= 151 && rank <= 350);
-
-                if (!validRank) {
-                    alert("That rank is outside the allowed range for this list.");
-                    return;
-                }
-
-                if (!confirm(
-                    `Approve "${submission.name}" as ${list.toUpperCase()} rank #${rank}?`
-                )) {
-                    return;
-                }
-
-                approveButton.disabled = true;
-                rejectButton.disabled = true;
-                approveButton.textContent = "Approving...";
-
-                try {
-                    const { data, error } = await supabaseClient.rpc(
-                        "review_level_submission",
-                        {
-                            p_submission_id: submission.id,
-                            p_decision: "approved",
-                            p_rank: rank
-                        }
-                    );
-
-                    if (error) {
-                        throw error;
-                    }
-
-                    if (data && data.success === false) {
-                        throw new Error(data.message || "Approval failed.");
-                    }
-
-                    alert(
-                        `Level approved!\nRank: #${rank}\nPoints: ${data.points}`
-                    );
-
-                    await loadLevelSubmissionQueue();
-
-                } catch (error) {
-                    console.error("Level approval failed:", error);
-                    alert(error.message || "Could not approve this submission.");
-
-                    approveButton.disabled = false;
-                    rejectButton.disabled = false;
-                    approveButton.textContent = "Approve";
-                }
-            });
-
-            rejectButton.addEventListener("click", async () => {
-                if (!confirm(`Reject "${submission.name}"?`)) {
-                    return;
-                }
-
-                approveButton.disabled = true;
-                rejectButton.disabled = true;
-                rejectButton.textContent = "Rejecting...";
-
-                try {
-                    const { error } = await supabaseClient.rpc(
-                        "review_level_submission",
-                        {
-                            p_submission_id: submission.id,
-                            p_decision: "rejected",
-                            p_rank: null
-                        }
-                    );
-
-                    if (error) {
-                        throw error;
-                    }
-
-                    alert("Submission rejected.");
-                    await loadLevelSubmissionQueue();
-
-                } catch (error) {
-                    console.error("Level rejection failed:", error);
-                    alert(error.message || "Could not reject this submission.");
-
-                    approveButton.disabled = false;
-                    rejectButton.disabled = false;
-                    rejectButton.textContent = "Reject";
-                }
-            });
-
-            actions.append(approveButton, rejectButton);
-            card.append(title, details, reason, actions);
-            levelQueue.appendChild(card);
-        });
-    }
-
-    async function loadCompletionSubmissionQueue() {
-        const { data: submissions, error } = await supabaseClient
-            .from("completion_submissions")
-            .select("*")
-            .eq("status", "pending")
-            .order("id", { ascending: true });
-
-        if (error) {
-            throw error;
-        }
-
-        if (pendingCompletionCount) {
-            pendingCompletionCount.textContent = submissions.length;
-        }
-
-        if (!submissions.length) {
-            completionQueue.innerHTML = "<p>No pending completion submissions.</p>";
-            return;
-        }
-
-        completionQueue.innerHTML = "";
-
-        for (const submission of submissions) {
-            const card = document.createElement("article");
-            card.className = "staff-review-card";
-
-            const title = document.createElement("h3");
-            title.textContent = `Completion submission`;
-
-            const details = document.createElement("p");
-            details.textContent =
-                `Submission: ${submission.id} | ` +
-                `User: ${submission.submitted_by || "Unknown"} | ` +
-                `Level: ${submission.level_id || "Unknown"}`;
-
-            const username = document.createElement("p");
-            username.textContent =
-                `GD Username: ${submission.gd_username || "Not provided"}`;
-
-            const notes = document.createElement("p");
-            notes.textContent =
-                `Notes: ${submission.notes || "No notes provided"}`;
-
-            const actions = document.createElement("div");
-            actions.className = "staff-review-actions";
-
-            if (submission.evidence_url) {
-                const evidenceLink = document.createElement("a");
-                evidenceLink.href = submission.evidence_url;
-                evidenceLink.target = "_blank";
-                evidenceLink.rel = "noopener noreferrer";
-                evidenceLink.textContent = "View Evidence";
-                actions.appendChild(evidenceLink);
-            }
-
-            const approveButton = document.createElement("button");
-            approveButton.type = "button";
-            approveButton.textContent = "Approve";
-            approveButton.className = "staff-approve-button";
-
-            const rejectButton = document.createElement("button");
-            rejectButton.type = "button";
-            rejectButton.textContent = "Reject";
-            rejectButton.className = "staff-reject-button";
-
-            async function reviewCompletion(decision) {
-                approveButton.disabled = true;
-                rejectButton.disabled = true;
-
-                try {
-                    const { error } = await supabaseClient.rpc(
-                        "review_completion_submission",
-                        {
-                            p_submission_id: submission.id,
-                            p_decision: decision
-                        }
-                    );
-
-                    if (error) {
-                        throw error;
-                    }
-
-                    alert(
-                        decision === "approved"
-                            ? "Completion approved."
-                            : "Completion rejected."
-                    );
-
-                    await loadCompletionSubmissionQueue();
-
-                } catch (error) {
-                    console.error("Completion review failed:", error);
-                    alert(error.message || "Could not review this completion.");
-
-                    approveButton.disabled = false;
-                    rejectButton.disabled = false;
-                }
-            }
-
-            approveButton.addEventListener("click", () => {
-                if (confirm("Approve this completion?")) {
-                    reviewCompletion("approved");
-                }
-            });
-
-            rejectButton.addEventListener("click", () => {
-                if (confirm("Reject this completion?")) {
-                    reviewCompletion("rejected");
-                }
-            });
-
-            actions.append(approveButton, rejectButton);
-            card.append(title, details, username, notes, actions);
-            completionQueue.appendChild(card);
-        }
-    }
-}
-
-
-
-
-
-
-
-// HLL COMPLETION UUID HOTFIX
-window.addEventListener("load", async function () {
-    const select = document.getElementById("completion-level");
-    if (!select) return;
-
-    // Wait for the existing HLL initialization to finish.
-    let client = null;
-
-    for (let attempt = 0; attempt < 30; attempt++) {
-        client =
-            (typeof supabaseClient !== "undefined" && supabaseClient) ||
-            window.supabaseClient ||
-            window.hllSupabase ||
-            null;
-
-        if (client && typeof client.from === "function") break;
-
-        await new Promise(resolve => setTimeout(resolve, 500));
-    }
-
-    if (!client || typeof client.from !== "function") {
-        console.error("[HLL HOTFIX] Supabase client is not initialized.");
-        return;
-    }
-
-    try {
-        const { data, error } = await client
-            .from("levels")
-            .select("uuid, name, rank, status")
-            .eq("status", "approved")
-            .order("rank", { ascending: true });
-
-        if (error) throw error;
-
-        select.innerHTML = '<option value="">Choose a ranked level</option>';
-
-        (data || []).forEach(level => {
-            if (!level.uuid) return;
-
-            const option = document.createElement("option");
-            option.value = level.uuid;
-            option.textContent = `#${level.rank ?? "—"} — ${level.name}`;
-            select.appendChild(option);
-        });
-
-        console.log("[HLL HOTFIX] Levels loaded:", select.options.length - 1);
-    } catch (error) {
-        console.error("[HLL HOTFIX] Level loading failed:", error);
-    }
-});
-
-
-// HLL COMPLETION HOTFIX V2
-window.addEventListener("load", async () => {
-    const select = document.getElementById("completion-level");
-    if (!select) return;
-
-    let client = null;
-
-    for (let i = 0; i < 20; i++) {
-        client =
-            (typeof supabaseClient !== "undefined" && supabaseClient) ||
-            window.supabaseClient ||
-            window.hllSupabase ||
-            null;
-
-        if (client && typeof client.from === "function") break;
-        await new Promise(resolve => setTimeout(resolve, 500));
-    }
-
-    if (!client || typeof client.from !== "function") {
-        console.error("[HLL V2] Supabase client unavailable.");
-        return;
-    }
-
-    try {
-        const { data, error } = await client
-            .from("levels")
-            .select("id, name, rank, status")
-            .eq("status", "approved")
-            .order("rank", { ascending: true });
-
-        if (error) throw error;
-
-        select.innerHTML = '<option value="">Choose a ranked level</option>';
-
-        (data || []).forEach(level => {
-            if (level.id == null) return;
-
-            const option = document.createElement("option");
-            option.value = String(level.id);
-            option.textContent = `#${level.rank ?? "—"} — ${level.name}`;
-            select.appendChild(option);
-        });
-
-        console.log("[HLL V2] Loaded", select.options.length - 1, "levels.");
-    } catch (error) {
-        console.error("[HLL V2] Failed to load levels:", error);
-    }
-});
-
-
-
-
-
-
-
-/* =========================================
-   HLL COMPLETION FIX
-   Paste at the very bottom of script.js
-   ========================================= */
-
-window.addEventListener("load", async () => {
-    const select = document.getElementById("completion-level");
-    const form = document.getElementById("completion-form");
-
-    if (!select || !form) return;
-
-    const client =
-        (typeof supabaseClient !== "undefined" && supabaseClient) ||
-        window.supabaseClient ||
-        window.hllSupabase;
-
-    if (!client || typeof client.from !== "function") {
-        console.error("[HLL Completion] Supabase client unavailable.");
-        return;
-    }
-
-    // Load approved levels using the real levels.id column.
-    try {
-        const { data: levels, error } = await client
-            .from("levels")
-            .select("id, name, rank, status")
-            .eq("status", "approved")
-            .order("rank", { ascending: true });
-
-        if (error) throw error;
-
-        select.innerHTML = '<option value="">Choose a ranked level</option>';
-
-        (levels || []).forEach(level => {
-            if (level.id == null) return;
-
-            const option = document.createElement("option");
-            option.value = String(level.id);
-            option.textContent =
-                `#${level.rank ?? "—"} — ${level.name ?? "Unnamed level"}`;
-
-            select.appendChild(option);
-        });
-
-        const requestedLevel = new URLSearchParams(location.search).get("level");
-        if (requestedLevel) select.value = requestedLevel;
-
-        console.log("[HLL Completion] Loaded", select.options.length - 1, "levels.");
-    } catch (error) {
-        console.error("[HLL Completion] Could not load levels:", error);
-        select.innerHTML = '<option value="">Could not load levels</option>';
-    }
-
-    // Replace the form submit handler to prevent duplicate submissions.
-    const replacementForm = form.cloneNode(true);
-    form.replaceWith(replacementForm);
-
-    replacementForm.addEventListener("submit", async event => {
-        event.preventDefault();
-
-        const message = document.getElementById("completion-message");
-        const showMessage = (text, success = false) => {
-            if (message) {
-                message.textContent = text;
-                message.style.color = success ? "#42d392" : "#ff6b6b";
-            } else {
-                alert(text);
-            }
-        };
-
-        try {
-            const { data: authData, error: authError } =
-                await client.auth.getUser();
-
-            if (authError) throw authError;
-
-            const user = authData?.user;
-            if (!user) {
-                showMessage("Please log in before submitting a completion.");
-                return;
-            }
-
-            const levelId = replacementForm.querySelector("#completion-level")?.value;
-            const gdUsername =
-                replacementForm.querySelector("#completion-gd-username")?.value.trim();
-            const evidenceUrl =
-                replacementForm.querySelector("#completion-evidence")?.value.trim();
-            const notes =
-                replacementForm.querySelector("#completion-notes")?.value.trim() || "";
-
-            if (!levelId || !gdUsername || !evidenceUrl) {
-                showMessage("Please complete all required fields.");
-                return;
-            }
-
-            // Never submit a level name as the database ID.
-            const { data: level, error: levelError } = await client
-                .from("levels")
-                .select("id, name")
-                .eq("id", levelId)
-                .maybeSingle();
-
-            if (levelError) throw levelError;
-
-            if (!level) {
-                showMessage("That level could not be found. Refresh and try again.");
-                return;
-            }
-
-            /*
-             * completion_submissions.level_id is UUID in your current schema,
-             * while levels.id may be a different type. Do not send a guessed
-             * or human-readable value into that UUID column.
-             */
-            const { error: insertError } = await client
-                .from("completion_submissions")
-                .insert({
-                    submitted_by: user.id,
-                    level_id: level.id,
-                    gd_username: gdUsername,
-                    evidence_url: evidenceUrl,
-                    notes: notes,
-                    status: "pending"
-                });
-
-            if (insertError) {
-                console.error("[HLL Completion] Database rejected submission:", insertError);
-
-                if (insertError.code === "22P02") {
-                    showMessage(
-                        "Database ID mismatch: completion_submissions.level_id expects a UUID, " +
-                        "but levels.id uses a different ID format. The database relationship must be fixed."
-                    );
-                } else {
-                    showMessage(insertError.message || "Could not submit completion.");
-                }
-                return;
-            }
-
-            replacementForm.reset();
-            showMessage("Completion submitted for staff review!", true);
-
-        } catch (error) {
-            console.error("[HLL Completion] Submission failed:", error);
-            showMessage(error.message || "An unexpected error occurred.");
-        }
-    });
-});
-
-
-
-
-
-/* =========================================
-   HLL COMPLETION UUID HOTFIX
-   ========================================= */
-(() => {
-    async function fixCompletionDropdown() {
-        const select = document.getElementById("completion-level");
-        if (!select || !window.supabaseClient) return;
-
-        const { data, error } = await window.supabaseClient
-            .from("levels")
-            .select("id, name, rank")
-            .eq("status", "approved")
-            .order("rank", { ascending: true });
-
-        if (error) {
-            console.error("HLL: Could not load levels:", error);
-            return;
-        }
-
-        const previousValue = select.value;
-
-        select.innerHTML = '<option value="">Choose a ranked level</option>';
-
-        (data || []).forEach(level => {
-            const option = document.createElement("option");
-            option.value = level.id; // UUID, never the level name
-            option.textContent =
-                `#${level.rank ?? "—"} — ${level.name}`;
-            select.appendChild(option);
-        });
-
-        if (previousValue && (data || []).some(level => level.id === previousValue)) {
-            select.value = previousValue;
-        }
-    }
-
-    document.addEventListener("DOMContentLoaded", fixCompletionDropdown);
-    fixCompletionDropdown();
-})();
