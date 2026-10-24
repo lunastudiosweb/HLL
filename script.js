@@ -2354,3 +2354,355 @@ async function setupStaffDashboard() {
     }
 }
 
+
+
+/* =========================================
+   HLL STAFF DASHBOARD
+   LEVEL + COMPLETION REVIEW
+   ========================================= */
+
+async function setupStaffDashboard() {
+    const statusElement = document.getElementById("staff-status");
+    const levelQueue = document.getElementById("staff-level-queue");
+    const completionQueue = document.getElementById("staff-completion-queue");
+    const pendingLevelCount = document.getElementById("pending-level-count");
+    const pendingCompletionCount = document.getElementById("pending-completion-count");
+
+    if (!levelQueue || !completionQueue) {
+        return;
+    }
+
+    levelQueue.innerHTML = "<p>Loading level submissions...</p>";
+    completionQueue.innerHTML = "<p>Loading completion submissions...</p>";
+
+    try {
+        const {
+            data: { user },
+            error: authError
+        } = await supabaseClient.auth.getUser();
+
+        if (authError || !user) {
+            throw new Error("Please log in before opening the staff dashboard.");
+        }
+
+        const { data: staff, error: staffError } = await supabaseClient
+            .from("staff_members")
+            .select("role")
+            .eq("user_id", user.id)
+            .maybeSingle();
+
+        if (staffError) {
+            throw staffError;
+        }
+
+        if (!staff || !["admin", "moderator"].includes(staff.role)) {
+            throw new Error("You do not have permission to access the staff dashboard.");
+        }
+
+        if (statusElement) {
+            statusElement.textContent = `Signed in as staff (${staff.role}).`;
+        }
+
+        await Promise.all([
+            loadLevelSubmissionQueue(),
+            loadCompletionSubmissionQueue()
+        ]);
+
+    } catch (error) {
+        console.error("HLL staff dashboard error:", error);
+
+        if (statusElement) {
+            statusElement.textContent = error.message || "Could not load the staff dashboard.";
+        }
+
+        levelQueue.innerHTML = "<p>Could not load level submissions.</p>";
+        completionQueue.innerHTML = "<p>Could not load completion submissions.</p>";
+    }
+
+    async function loadLevelSubmissionQueue() {
+        const { data: submissions, error } = await supabaseClient
+            .from("level_submissions")
+            .select("*")
+            .eq("status", "pending")
+            .order("id", { ascending: true });
+
+        if (error) {
+            throw error;
+        }
+
+        if (pendingLevelCount) {
+            pendingLevelCount.textContent = submissions.length;
+        }
+
+        if (!submissions.length) {
+            levelQueue.innerHTML = "<p>No pending level submissions.</p>";
+            return;
+        }
+
+        levelQueue.innerHTML = "";
+
+        submissions.forEach((submission) => {
+            const card = document.createElement("article");
+            card.className = "staff-review-card";
+
+            const title = document.createElement("h3");
+            title.textContent = submission.name || "Untitled level";
+
+            const details = document.createElement("p");
+            details.textContent =
+                `Game Level ID: ${submission.level_id || "Not provided"} | ` +
+                `Creator: ${submission.creator || "Unknown"} | ` +
+                `List: ${submission.suggested_list || "Unknown"}`;
+
+            const reason = document.createElement("p");
+            reason.textContent = `Reason: ${submission.reason || "No reason provided"}`;
+
+            const actions = document.createElement("div");
+            actions.className = "staff-review-actions";
+
+            const approveButton = document.createElement("button");
+            approveButton.type = "button";
+            approveButton.textContent = "Approve";
+            approveButton.className = "staff-approve-button";
+
+            const rejectButton = document.createElement("button");
+            rejectButton.type = "button";
+            rejectButton.textContent = "Reject";
+            rejectButton.className = "staff-reject-button";
+
+            approveButton.addEventListener("click", async () => {
+                const list = String(submission.suggested_list || "")
+                    .trim()
+                    .toLowerCase();
+
+                if (list !== "main" && list !== "extended") {
+                    alert("This submission has an invalid list type.");
+                    return;
+                }
+
+                const rankPrompt = list === "main"
+                    ? "Enter the Main List rank (1–150):"
+                    : "Enter the Extended List rank (151–350):";
+
+                const rankInput = prompt(rankPrompt);
+
+                if (rankInput === null) {
+                    return;
+                }
+
+                const rank = Number(rankInput);
+
+                const validRank =
+                    Number.isInteger(rank) &&
+                    (list === "main"
+                        ? rank >= 1 && rank <= 150
+                        : rank >= 151 && rank <= 350);
+
+                if (!validRank) {
+                    alert("That rank is outside the allowed range for this list.");
+                    return;
+                }
+
+                if (!confirm(
+                    `Approve "${submission.name}" as ${list.toUpperCase()} rank #${rank}?`
+                )) {
+                    return;
+                }
+
+                approveButton.disabled = true;
+                rejectButton.disabled = true;
+                approveButton.textContent = "Approving...";
+
+                try {
+                    const { data, error } = await supabaseClient.rpc(
+                        "review_level_submission",
+                        {
+                            p_submission_id: submission.id,
+                            p_decision: "approved",
+                            p_rank: rank
+                        }
+                    );
+
+                    if (error) {
+                        throw error;
+                    }
+
+                    if (data && data.success === false) {
+                        throw new Error(data.message || "Approval failed.");
+                    }
+
+                    alert(
+                        `Level approved!\nRank: #${rank}\nPoints: ${data.points}`
+                    );
+
+                    await loadLevelSubmissionQueue();
+
+                } catch (error) {
+                    console.error("Level approval failed:", error);
+                    alert(error.message || "Could not approve this submission.");
+
+                    approveButton.disabled = false;
+                    rejectButton.disabled = false;
+                    approveButton.textContent = "Approve";
+                }
+            });
+
+            rejectButton.addEventListener("click", async () => {
+                if (!confirm(`Reject "${submission.name}"?`)) {
+                    return;
+                }
+
+                approveButton.disabled = true;
+                rejectButton.disabled = true;
+                rejectButton.textContent = "Rejecting...";
+
+                try {
+                    const { error } = await supabaseClient.rpc(
+                        "review_level_submission",
+                        {
+                            p_submission_id: submission.id,
+                            p_decision: "rejected",
+                            p_rank: null
+                        }
+                    );
+
+                    if (error) {
+                        throw error;
+                    }
+
+                    alert("Submission rejected.");
+                    await loadLevelSubmissionQueue();
+
+                } catch (error) {
+                    console.error("Level rejection failed:", error);
+                    alert(error.message || "Could not reject this submission.");
+
+                    approveButton.disabled = false;
+                    rejectButton.disabled = false;
+                    rejectButton.textContent = "Reject";
+                }
+            });
+
+            actions.append(approveButton, rejectButton);
+            card.append(title, details, reason, actions);
+            levelQueue.appendChild(card);
+        });
+    }
+
+    async function loadCompletionSubmissionQueue() {
+        const { data: submissions, error } = await supabaseClient
+            .from("completion_submissions")
+            .select("*")
+            .eq("status", "pending")
+            .order("id", { ascending: true });
+
+        if (error) {
+            throw error;
+        }
+
+        if (pendingCompletionCount) {
+            pendingCompletionCount.textContent = submissions.length;
+        }
+
+        if (!submissions.length) {
+            completionQueue.innerHTML = "<p>No pending completion submissions.</p>";
+            return;
+        }
+
+        completionQueue.innerHTML = "";
+
+        for (const submission of submissions) {
+            const card = document.createElement("article");
+            card.className = "staff-review-card";
+
+            const title = document.createElement("h3");
+            title.textContent = `Completion submission`;
+
+            const details = document.createElement("p");
+            details.textContent =
+                `Submission: ${submission.id} | ` +
+                `User: ${submission.submitted_by || "Unknown"} | ` +
+                `Level: ${submission.level_id || "Unknown"}`;
+
+            const username = document.createElement("p");
+            username.textContent =
+                `GD Username: ${submission.gd_username || "Not provided"}`;
+
+            const notes = document.createElement("p");
+            notes.textContent =
+                `Notes: ${submission.notes || "No notes provided"}`;
+
+            const actions = document.createElement("div");
+            actions.className = "staff-review-actions";
+
+            if (submission.evidence_url) {
+                const evidenceLink = document.createElement("a");
+                evidenceLink.href = submission.evidence_url;
+                evidenceLink.target = "_blank";
+                evidenceLink.rel = "noopener noreferrer";
+                evidenceLink.textContent = "View Evidence";
+                actions.appendChild(evidenceLink);
+            }
+
+            const approveButton = document.createElement("button");
+            approveButton.type = "button";
+            approveButton.textContent = "Approve";
+            approveButton.className = "staff-approve-button";
+
+            const rejectButton = document.createElement("button");
+            rejectButton.type = "button";
+            rejectButton.textContent = "Reject";
+            rejectButton.className = "staff-reject-button";
+
+            async function reviewCompletion(decision) {
+                approveButton.disabled = true;
+                rejectButton.disabled = true;
+
+                try {
+                    const { error } = await supabaseClient.rpc(
+                        "review_completion_submission",
+                        {
+                            p_submission_id: submission.id,
+                            p_decision: decision
+                        }
+                    );
+
+                    if (error) {
+                        throw error;
+                    }
+
+                    alert(
+                        decision === "approved"
+                            ? "Completion approved."
+                            : "Completion rejected."
+                    );
+
+                    await loadCompletionSubmissionQueue();
+
+                } catch (error) {
+                    console.error("Completion review failed:", error);
+                    alert(error.message || "Could not review this completion.");
+
+                    approveButton.disabled = false;
+                    rejectButton.disabled = false;
+                }
+            }
+
+            approveButton.addEventListener("click", () => {
+                if (confirm("Approve this completion?")) {
+                    reviewCompletion("approved");
+                }
+            });
+
+            rejectButton.addEventListener("click", () => {
+                if (confirm("Reject this completion?")) {
+                    reviewCompletion("rejected");
+                }
+            });
+
+            actions.append(approveButton, rejectButton);
+            card.append(title, details, username, notes, actions);
+            completionQueue.appendChild(card);
+        }
+    }
+}
