@@ -2153,3 +2153,204 @@ async function startHLL() {
 }
 
 document.addEventListener("DOMContentLoaded", startHLL);
+
+
+
+
+/* ============================================
+   HLL STAFF DASHBOARD — COMPLETION REVIEW
+   Paste at the VERY BOTTOM of script.js
+   ============================================ */
+
+async function setupStaffDashboard() {
+    const statusEl = document.getElementById("staff-status");
+    const pendingCompletionCount = document.getElementById("pending-completion-count");
+    const completionQueue = document.getElementById("staff-completion-queue");
+    const pendingLevelCount = document.getElementById("pending-level-count");
+    const levelQueue = document.getElementById("staff-level-queue");
+
+    if (!statusEl || !completionQueue) {
+        console.error("HLL Staff: Required dashboard elements were not found.");
+        return;
+    }
+
+    statusEl.textContent = "Checking staff permissions...";
+
+    try {
+        const {
+            data: { user },
+            error: authError
+        } = await supabaseClient.auth.getUser();
+
+        if (authError) throw authError;
+
+        if (!user) {
+            statusEl.textContent = "Please log in to access the staff dashboard.";
+            completionQueue.innerHTML = "<p>You must log in first.</p>";
+            return;
+        }
+
+        const { data: staff, error: staffError } = await supabaseClient
+            .from("staff_members")
+            .select("role")
+            .eq("user_id", user.id)
+            .maybeSingle();
+
+        if (staffError) throw staffError;
+
+        if (!staff || !["admin", "moderator"].includes(staff.role)) {
+            statusEl.textContent = "Access denied. Staff authorization required.";
+            completionQueue.innerHTML = "<p>You do not have permission to review submissions.</p>";
+
+            if (pendingCompletionCount) pendingCompletionCount.textContent = "—";
+            if (pendingLevelCount) pendingLevelCount.textContent = "—";
+            return;
+        }
+
+        statusEl.textContent = `Staff access confirmed: ${staff.role}`;
+
+        await loadPendingCompletions();
+
+        // Level submissions are not implemented by this review function yet.
+        if (pendingLevelCount) pendingLevelCount.textContent = "—";
+
+        if (levelQueue) {
+            levelQueue.innerHTML =
+                "<p>The level-submission review queue has not been connected yet.</p>";
+        }
+
+    } catch (error) {
+        console.error("HLL Staff Dashboard Error:", error);
+        statusEl.textContent =
+            "Dashboard error: " +
+            (typeof getErrorMessage === "function"
+                ? getErrorMessage(error)
+                : error.message || "Unknown error");
+    }
+
+    async function loadPendingCompletions() {
+        completionQueue.innerHTML = "<p>Loading pending completions...</p>";
+
+        const { data: submissions, error } = await supabaseClient
+            .from("completion_submissions")
+            .select("*")
+            .eq("status", "pending")
+            .order("id", { ascending: true });
+
+        if (error) throw error;
+
+        const pending = submissions || [];
+
+        if (pendingCompletionCount) {
+            pendingCompletionCount.textContent = String(pending.length);
+        }
+
+        if (pending.length === 0) {
+            completionQueue.innerHTML = "<p>No pending completion submissions.</p>";
+            return;
+        }
+
+        completionQueue.innerHTML = "";
+
+        for (const submission of pending) {
+            const card = document.createElement("article");
+            card.className = "staff-submission-card";
+
+            const title = document.createElement("h3");
+            title.textContent = "Completion Submission";
+
+            const details = document.createElement("p");
+            details.textContent =
+                `Submission ID: ${submission.id}\n` +
+                `User ID: ${submission.submitted_by || "Unknown"}\n` +
+                `Level ID: ${submission.level_id || "Unknown"}\n` +
+                `Geometry Dash Username: ${submission.gd_username || "Not provided"}\n` +
+                `Notes: ${submission.notes || "None"}`;
+
+            details.style.whiteSpace = "pre-line";
+
+            card.appendChild(title);
+            card.appendChild(details);
+
+            if (submission.evidence_url) {
+                const evidence = document.createElement("a");
+                evidence.href = submission.evidence_url;
+                evidence.target = "_blank";
+                evidence.rel = "noopener noreferrer";
+                evidence.textContent = "View Evidence";
+                evidence.className = "button";
+                card.appendChild(evidence);
+            }
+
+            const actions = document.createElement("div");
+            actions.className = "staff-submission-actions";
+
+            const approveButton = document.createElement("button");
+            approveButton.type = "button";
+            approveButton.textContent = "Approve";
+            approveButton.className = "button approve-button";
+
+            const rejectButton = document.createElement("button");
+            rejectButton.type = "button";
+            rejectButton.textContent = "Reject";
+            rejectButton.className = "button reject-button";
+
+            approveButton.addEventListener("click", () => {
+                reviewSubmission(submission.id, "approved", card);
+            });
+
+            rejectButton.addEventListener("click", () => {
+                reviewSubmission(submission.id, "rejected", card);
+            });
+
+            actions.appendChild(approveButton);
+            actions.appendChild(rejectButton);
+            card.appendChild(actions);
+            completionQueue.appendChild(card);
+        }
+    }
+
+    async function reviewSubmission(submissionId, decision, card) {
+        const confirmed = confirm(
+            `Are you sure you want to ${decision === "approved" ? "APPROVE" : "REJECT"} this completion submission?`
+        );
+
+        if (!confirmed) return;
+
+        const buttons = card.querySelectorAll("button");
+        buttons.forEach(button => button.disabled = true);
+
+        try {
+            const { data, error } = await supabaseClient.rpc(
+                "review_completion_submission",
+                {
+                    p_submission_id: submissionId,
+                    p_decision: decision
+                }
+            );
+
+            if (error) throw error;
+
+            if (!data || data.success !== true) {
+                throw new Error("The review operation did not confirm success.");
+            }
+
+            card.innerHTML = `<p>Submission ${decision} successfully.</p>`;
+
+            await loadPendingCompletions();
+
+        } catch (error) {
+            console.error("HLL Review Error:", error);
+
+            alert(
+                "Could not review this submission:\n" +
+                (typeof getErrorMessage === "function"
+                    ? getErrorMessage(error)
+                    : error.message || "Unknown error")
+            );
+
+            buttons.forEach(button => button.disabled = false);
+        }
+    }
+}
+
