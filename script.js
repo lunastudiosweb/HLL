@@ -124,7 +124,15 @@ function describeDbError(error) {
         return "A required database column was empty: " + text;
     }
 
-    return getErrorMessage(error);
+    // Unknown error: show everything the server told us.
+    const parts = [
+        error?.message,
+        error?.code ? `(code: ${error.code})` : "",
+        error?.details ? `Details: ${error.details}` : "",
+        error?.hint ? `Hint: ${error.hint}` : ""
+    ].filter(Boolean);
+
+    return parts.join(" ") || getErrorMessage(error);
 }
 
 function formatDate(value) {
@@ -1209,7 +1217,7 @@ function setupLevelSubmission() {
                 "success"
             );
         } catch (error) {
-            console.error("Level submission failed:", error);
+            console.error("Level submission failed:", JSON.stringify(error, null, 2));
             showMessage(message, describeDbError(error), "error");
         } finally {
             setLoading(button, false);
@@ -1316,7 +1324,7 @@ function setupCompletionSubmission() {
                 "success"
             );
         } catch (error) {
-            console.error("Completion submission failed:", error);
+            console.error("Completion submission failed:", JSON.stringify(error, null, 2));
             showMessage(message, describeDbError(error), "error");
         } finally {
             setLoading(button, false);
