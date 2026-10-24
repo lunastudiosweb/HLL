@@ -2968,3 +2968,47 @@ window.addEventListener("load", async () => {
         }
     });
 });
+
+
+
+
+
+/* =========================================
+   HLL COMPLETION UUID HOTFIX
+   ========================================= */
+(() => {
+    async function fixCompletionDropdown() {
+        const select = document.getElementById("completion-level");
+        if (!select || !window.supabaseClient) return;
+
+        const { data, error } = await window.supabaseClient
+            .from("levels")
+            .select("id, name, rank")
+            .eq("status", "approved")
+            .order("rank", { ascending: true });
+
+        if (error) {
+            console.error("HLL: Could not load levels:", error);
+            return;
+        }
+
+        const previousValue = select.value;
+
+        select.innerHTML = '<option value="">Choose a ranked level</option>';
+
+        (data || []).forEach(level => {
+            const option = document.createElement("option");
+            option.value = level.id; // UUID, never the level name
+            option.textContent =
+                `#${level.rank ?? "—"} — ${level.name}`;
+            select.appendChild(option);
+        });
+
+        if (previousValue && (data || []).some(level => level.id === previousValue)) {
+            select.value = previousValue;
+        }
+    }
+
+    document.addEventListener("DOMContentLoaded", fixCompletionDropdown);
+    fixCompletionDropdown();
+})();
