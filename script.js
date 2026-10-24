@@ -2712,13 +2712,34 @@ async function setupStaffDashboard() {
 
 
 
-// HLL HOTFIX: Use level UUIDs in the completion dropdown
-(async function HLLCompletionUUIDFix() {
+
+// HLL COMPLETION UUID HOTFIX
+window.addEventListener("load", async function () {
     const select = document.getElementById("completion-level");
-    if (!select || typeof supabaseClient === "undefined") return;
+    if (!select) return;
+
+    // Wait for the existing HLL initialization to finish.
+    let client = null;
+
+    for (let attempt = 0; attempt < 30; attempt++) {
+        client =
+            (typeof supabaseClient !== "undefined" && supabaseClient) ||
+            window.supabaseClient ||
+            window.hllSupabase ||
+            null;
+
+        if (client && typeof client.from === "function") break;
+
+        await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    if (!client || typeof client.from !== "function") {
+        console.error("[HLL HOTFIX] Supabase client is not initialized.");
+        return;
+    }
 
     try {
-        const { data: levels, error } = await supabaseClient
+        const { data, error } = await client
             .from("levels")
             .select("uuid, name, rank, status")
             .eq("status", "approved")
@@ -2728,7 +2749,7 @@ async function setupStaffDashboard() {
 
         select.innerHTML = '<option value="">Choose a ranked level</option>';
 
-        (levels || []).forEach(level => {
+        (data || []).forEach(level => {
             if (!level.uuid) return;
 
             const option = document.createElement("option");
@@ -2737,19 +2758,8 @@ async function setupStaffDashboard() {
             select.appendChild(option);
         });
 
-        const requestedLevel = new URLSearchParams(location.search).get("level");
-        if (requestedLevel) {
-            const matchingOption = [...select.options].find(
-                option => option.value === requestedLevel
-                    || option.textContent.includes(requestedLevel)
-            );
-
-            if (matchingOption) select.value = matchingOption.value;
-        }
-
-        console.log("[HLL HOTFIX] Completion dropdown loaded with UUIDs.");
+        console.log("[HLL HOTFIX] Levels loaded:", select.options.length - 1);
     } catch (error) {
-        console.error("[HLL HOTFIX] Could not load levels:", error);
+        console.error("[HLL HOTFIX] Level loading failed:", error);
     }
-})();
-
+});
