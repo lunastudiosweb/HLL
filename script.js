@@ -990,6 +990,235 @@ async function renderLevelList(listType) {
    9. PLAYER LEADERBOARD
    ========================================================= */
 
+// Staff-only right-click (or long-press) menu on the player leaderboard.
+function setupPlayerContextMenu(list, players) {
+    if (!list || list.dataset.hllStaffMenuBound === "true") return;
+
+    list.dataset.hllStaffMenuBound = "true";
+
+    if (!document.getElementById("hll-staff-menu-styles")) {
+        const style = document.createElement("style");
+        style.id = "hll-staff-menu-styles";
+        style.textContent = `
+            .hll-staff-menu {
+                position: fixed;
+                z-index: 9999;
+                min-width: 230px;
+                padding: 6px;
+                background: #17171c;
+                border: 1px solid rgba(255, 255, 255, .14);
+                border-radius: 10px;
+                box-shadow: 0 12px 32px rgba(0, 0, 0, .55);
+                font-size: 14px;
+            }
+
+            .hll-staff-menu-title {
+                padding: 6px 10px;
+                color: #9a9aa6;
+                font-size: 12px;
+                text-transform: uppercase;
+                letter-spacing: .06em;
+            }
+
+            .hll-staff-menu button {
+                display: block;
+                width: 100%;
+                padding: 9px 10px;
+                background: none;
+                border: 0;
+                border-radius: 6px;
+                color: #f2f2f5;
+                text-align: left;
+                font: inherit;
+                cursor: pointer;
+            }
+
+            .hll-staff-menu button:hover {
+                background: rgba(255, 255, 255, .08);
+            }
+
+            .hll-staff-menu button.danger {
+                color: #ff6b6b;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    let menu = null;
+
+    function closeMenu() {
+        if (menu) menu.remove();
+        menu = null;
+    }
+
+    async function runStaffAction(functionName, args) {
+        closeMenu();
+
+        const { error } = await supabaseClient.rpc(functionName, args);
+
+        if (error) {
+            console.error("Staff action failed:", error);
+            alert("Could not complete that action:\n" + getErrorMessage(error));
+            return;
+        }
+
+        location.reload();
+    }
+
+    function openMenu(x, y, player) {
+        closeMenu();
+
+        menu = document.createElement("div");
+        menu.className = "hll-staff-menu";
+        menu.setAttribute("role", "menu");
+
+        const title = document.createElement("div");
+        title.className = "hll-staff-menu-title";
+        title.textContent = player.username || "Player";
+        menu.appendChild(title);
+
+        function addItem(label, handler, danger = false) {
+            const item = document.createElement("button");
+            item.type = "button";
+            item.textContent = label;
+            if (danger) item.className = "danger";
+            item.addEventListener("click", handler);
+            menu.appendChild(item);
+        }
+
+        addItem("View profile", () => {
+            location.href = `profile.html?id=${encodeURIComponent(player.id)}`;
+        });
+
+        addItem("Edit points…", () => {
+            closeMenu();
+
+            const input = prompt(
+                `Set total points for ${player.username}.\n` +
+                `From completions: ${player.basePoints}\n` +
+                `Current total: ${player.points}`,
+                String(player.points)
+            );
+
+            if (input === null) return;
+
+            const total = Number(input);
+
+            if (!Number.isInteger(total) || total < 0) {
+                alert("Enter a whole number, 0 or higher.");
+                return;
+            }
+
+            runStaffAction("staff_set_player_points", {
+                p_user_id: player.id,
+                p_adjustment: total - player.basePoints
+            });
+        });
+
+        if (player.adjustment !== 0) {
+            addItem("Reset to completion points", () => {
+                if (!confirm(`Remove the manual adjustment for ${player.username}?`)) return;
+
+                runStaffAction("staff_set_player_points", {
+                    p_user_id: player.id,
+                    p_adjustment: 0
+                });
+            });
+        }
+
+        if (player.hidden) {
+            addItem("Restore to leaderboard", () => {
+                runStaffAction("staff_set_player_hidden", {
+                    p_user_id: player.id,
+                    p_hidden: false
+                });
+            });
+        } else {
+            addItem("Remove from leaderboard", () => {
+                if (!confirm(
+                    `Remove ${player.username} from the leaderboard?\n` +
+                    "Their account and completions are kept, and you can restore them later."
+                )) return;
+
+                runStaffAction("staff_set_player_hidden", {
+                    p_user_id: player.id,
+                    p_hidden: true
+                });
+            }, true);
+        }
+
+        document.body.appendChild(menu);
+
+        const rect = menu.getBoundingClientRect();
+
+        menu.style.left =
+            Math.max(8, Math.min(x, window.innerWidth - rect.width - 8)) + "px";
+
+        menu.style.top =
+            Math.max(8, Math.min(y, window.innerHeight - rect.height - 8)) + "px";
+    }
+
+    function playerFromEvent(event) {
+        const card = event.target.closest?.(".hll-player-card");
+
+        if (!card) return null;
+
+        return players.find(
+            player => String(player.id) === card.dataset.playerId
+        ) || null;
+    }
+
+    list.addEventListener("contextmenu", event => {
+        const player = playerFromEvent(event);
+
+        if (!player) return;
+
+        event.preventDefault();
+        openMenu(event.clientX, event.clientY, player);
+    });
+
+    // Long-press for touch screens.
+    let pressTimer = null;
+    let longPressed = false;
+
+    list.addEventListener("touchstart", event => {
+        const player = playerFromEvent(event);
+
+        if (!player) return;
+
+        longPressed = false;
+
+        const touch = event.touches[0];
+
+        pressTimer = setTimeout(() => {
+            longPressed = true;
+            openMenu(touch.clientX, touch.clientY, player);
+        }, 600);
+    }, { passive: true });
+
+    ["touchend", "touchmove", "touchcancel"].forEach(name => {
+        list.addEventListener(name, () => clearTimeout(pressTimer), { passive: true });
+    });
+
+    list.addEventListener("click", event => {
+        if (longPressed) {
+            event.preventDefault();
+            longPressed = false;
+        }
+    });
+
+    document.addEventListener("click", event => {
+        if (menu && !menu.contains(event.target)) closeMenu();
+    });
+
+    document.addEventListener("keydown", event => {
+        if (event.key === "Escape") closeMenu();
+    });
+
+    window.addEventListener("scroll", closeMenu, { passive: true });
+    window.addEventListener("resize", closeMenu);
+}
+
 async function renderPlayersList() {
     const list = $("player-list");
     const count = $("player-count");
@@ -1010,7 +1239,7 @@ async function renderPlayersList() {
     ] = await Promise.all([
         supabaseClient
             .from("profiles")
-            .select("id, username, gd_username")
+            .select("id, username, gd_username, points_adjustment, leaderboard_hidden")
             .order("username", { ascending: true }),
 
         supabaseClient
@@ -1023,13 +1252,50 @@ async function renderPlayersList() {
             .select("user_id, level_id")
     ]);
 
-    if (profilesResult.error) {
+    let profilesData = profilesResult.data;
+
+    if (
+        profilesResult.error &&
+        /points_adjustment|leaderboard_hidden|column|schema cache/i.test(
+            profilesResult.error.message || ""
+        )
+    ) {
+        // The staff columns have not been added to the database yet.
+        const fallbackProfiles = await supabaseClient
+            .from("profiles")
+            .select("id, username, gd_username")
+            .order("username", { ascending: true });
+
+        if (fallbackProfiles.error) {
+            showEmptyState(
+                list,
+                "Could not load players",
+                fallbackProfiles.error.message
+            );
+            return;
+        }
+
+        profilesData = fallbackProfiles.data;
+    } else if (profilesResult.error) {
         showEmptyState(
             list,
             "Could not load players",
             profilesResult.error.message
         );
         return;
+    }
+
+    let isStaff = false;
+
+    if (currentUser) {
+        const { data: staffRow } = await supabaseClient
+            .from("staff_members")
+            .select("role")
+            .eq("user_id", currentUser.id)
+            .maybeSingle();
+
+        isStaff =
+            !!staffRow && ["admin", "moderator"].includes(staffRow.role);
     }
 
     let levelsData = levelsResult.data;
@@ -1086,9 +1352,11 @@ async function renderPlayersList() {
 
     const playerTotals = new Map();
 
-    for (const profile of profilesResult.data || []) {
+    for (const profile of profilesData || []) {
         playerTotals.set(profile.id, {
             ...profile,
+            adjustment: Number(profile.points_adjustment) || 0,
+            hidden: profile.leaderboard_hidden === true,
             points: 0,
             completions: 0
         });
@@ -1114,7 +1382,14 @@ async function renderPlayersList() {
         player.completions += 1;
     }
 
-    const players = [...playerTotals.values()].sort((a, b) =>
+    const players = [...playerTotals.values()]
+        .map(player => ({
+            ...player,
+            basePoints: player.points,
+            points: Math.max(0, player.points + player.adjustment)
+        }))
+        .filter(player => isStaff || !player.hidden)
+        .sort((a, b) =>
         b.points - a.points ||
         b.completions - a.completions ||
         String(a.username || "").localeCompare(String(b.username || ""))
@@ -1144,6 +1419,7 @@ async function renderPlayersList() {
             return `
                 <a
                     class="ranking-item hll-player-card"
+                    data-player-id="${escapeHTML(player.id)}"
                     href="profile.html?id=${encodeURIComponent(player.id)}"
                 >
                     <span class="ranking-position ${rankClass}">
@@ -1154,7 +1430,7 @@ async function renderPlayersList() {
                         <strong>${escapeHTML(player.username || "Player")}</strong>
                         <span>
                             ${player.completions}
-                            verified level${player.completions === 1 ? "" : "s"}
+                            verified level${player.completions === 1 ? "" : "s"}${player.hidden ? " · HIDDEN FROM LEADERBOARD" : ""}
                         </span>
                     </span>
 
@@ -1170,6 +1446,8 @@ async function renderPlayersList() {
     }
 
     render(players);
+
+    if (isStaff) setupPlayerContextMenu(list, players);
 
     if (search && search.dataset.hllPlayersSearchBound !== "true") {
         search.dataset.hllPlayersSearchBound = "true";
