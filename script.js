@@ -192,6 +192,41 @@ function validHttpUrl(value) {
     }
 }
 
+const UUID_PATTERN =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Always returns a real levels.id UUID, even if the dropdown value is a
+// level name or a "#1 — Name" label for some reason.
+async function resolveLevelUuid(rawValue, selectElement) {
+    const value = String(rawValue ?? "").trim();
+
+    if (UUID_PATTERN.test(value)) return value;
+
+    const selectedOption = selectElement?.selectedOptions?.[0];
+    const optionText = (selectedOption?.textContent || "").trim();
+
+    // Labels look like "#1 — Name"; strip the rank prefix to get the name.
+    const nameFromLabel = optionText.replace(/^#\S+\s*[—-]\s*/, "").trim();
+
+    const candidates = [...new Set([value, nameFromLabel].filter(Boolean))];
+
+    for (const candidate of candidates) {
+        const { data, error } = await supabaseClient
+            .from("levels")
+            .select("id")
+            .eq("status", "approved")
+            .eq("name", candidate)
+            .limit(1)
+            .maybeSingle();
+
+        if (!error && data?.id && UUID_PATTERN.test(String(data.id))) {
+            return data.id;
+        }
+    }
+
+    return null;
+}
+
 
 /* =========================================================
    3. SUPABASE INITIALIZATION
@@ -1301,12 +1336,22 @@ function setupCompletionSubmission() {
 
         setLoading(button, true);
 
+        let sentLevelId = levelId;
+
         try {
+            sentLevelId = await resolveLevelUuid(levelId, field("completion-level"));
+
+            if (!sentLevelId) {
+                throw new Error(
+                    "Could not find that level in the database. Refresh the page and pick it again."
+                );
+            }
+
             const { error } = await supabaseClient
                 .from("completion_submissions")
                 .insert({
                     submitted_by: user.id,
-                    level_id: levelId,
+                    level_id: sentLevelId,
                     gd_username: gdUsername,
                     evidence_url: evidenceUrl,
                     notes,
@@ -1325,7 +1370,11 @@ function setupCompletionSubmission() {
             );
         } catch (error) {
             console.error("Completion submission failed:", JSON.stringify(error, null, 2));
-            showMessage(message, describeDbError(error), "error");
+            showMessage(
+                message,
+                describeDbError(error) + ` [level_id sent: ${sentLevelId}]`,
+                "error"
+            );
         } finally {
             setLoading(button, false);
         }
