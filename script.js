@@ -1178,6 +1178,441 @@ function bindStaffContextMenu(list, cardSelector, getItem, buildMenu) {
     window.addEventListener("resize", closeMenu);
 }
 
+/* ---------- Admin logs ---------- */
+
+function describeLog(log) {
+    const d = log.details || {};
+    const target = log.target_name || "Unknown";
+    const quoted = `"${target}"`;
+    const player = d.player || "a player";
+
+    switch (log.action) {
+        case "level_added":
+            return `added the level ${quoted}` +
+                (d.rank ? ` at #${d.rank}` : "") +
+                (d.list_type ? ` in the ${d.list_type} list` : "");
+
+        case "level_moved":
+            return `moved ${quoted} ${d.direction || ""} from #${d.from_rank} to #${d.to_rank}` +
+                (d.swapped_with ? ` (swapped with "${d.swapped_with}")` : "");
+
+        case "level_removed":
+            return `removed the level ${quoted}` +
+                (d.rank ? ` (was #${d.rank})` : "");
+
+        case "level_restored":
+            return `restored the level ${quoted}` +
+                (d.rank ? ` to #${d.rank}` : "");
+
+        case "completion_approved":
+            return `approved ${player}'s completion of ${quoted}`;
+
+        case "completion_rejected":
+            return `rejected ${player}'s completion submission for ${quoted}`;
+
+        case "completion_removed":
+            return `removed ${player}'s completion of ${quoted}`;
+
+        case "level_submission_rejected":
+            return `rejected the level suggestion ${quoted}`;
+
+        case "points_edited":
+            return `changed ${target}'s points adjustment from ` +
+                `${d.old_adjustment ?? 0} to ${d.new_adjustment ?? 0}`;
+
+        case "player_hidden":
+            return `removed ${target} from the leaderboard`;
+
+        case "player_restored":
+            return `restored ${target} to the leaderboard`;
+
+        default:
+            return `${log.action}: ${target}`;
+    }
+}
+
+function logCategory(action) {
+    if (String(action).startsWith("level_submission")) return "Submissions";
+    if (String(action).startsWith("level")) return "Levels";
+    if (String(action).startsWith("completion")) return "Completions";
+    return "Players";
+}
+
+async function openLogsPanel() {
+    if (document.getElementById("hll-logs-panel")) return;
+
+    if (!document.getElementById("hll-logs-styles")) {
+        const style = document.createElement("style");
+        style.id = "hll-logs-styles";
+        style.textContent = `
+            .hll-logs-overlay {
+                position: fixed;
+                inset: 0;
+                z-index: 10000;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 16px;
+                background: rgba(0, 0, 0, .7);
+            }
+
+            .hll-logs-box {
+                display: flex;
+                flex-direction: column;
+                width: min(900px, 100%);
+                height: min(85vh, 760px);
+                background: #17171c;
+                border: 1px solid rgba(255, 255, 255, .14);
+                border-radius: 12px;
+                box-shadow: 0 16px 48px rgba(0, 0, 0, .6);
+                color: #f2f2f5;
+            }
+
+            .hll-logs-header {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                gap: 10px;
+                padding: 14px 18px;
+                border-bottom: 1px solid rgba(255, 255, 255, .1);
+            }
+
+            .hll-logs-header h3 {
+                margin: 0 auto 0 0;
+                font-size: 17px;
+            }
+
+            .hll-logs-header select,
+            .hll-logs-header input {
+                padding: 7px 10px;
+                background: #0f0f13;
+                border: 1px solid rgba(255, 255, 255, .16);
+                border-radius: 8px;
+                color: inherit;
+                font: inherit;
+            }
+
+            .hll-logs-header button,
+            .hll-logs-more {
+                padding: 7px 14px;
+                background: rgba(255, 255, 255, .08);
+                border: 0;
+                border-radius: 8px;
+                color: inherit;
+                font: inherit;
+                cursor: pointer;
+            }
+
+            .hll-logs-list {
+                flex: 1;
+                padding: 4px 18px;
+                overflow-y: auto;
+            }
+
+            .hll-log-row {
+                display: flex;
+                gap: 14px;
+                padding: 11px 0;
+                border-bottom: 1px solid rgba(255, 255, 255, .07);
+                line-height: 1.4;
+            }
+
+            .hll-log-time {
+                flex: 0 0 150px;
+                color: #9a9aa6;
+                font-size: 12.5px;
+            }
+
+            .hll-log-tag {
+                flex: 0 0 auto;
+                align-self: flex-start;
+                padding: 2px 8px;
+                border-radius: 999px;
+                background: rgba(255, 255, 255, .08);
+                color: #b9b9c4;
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: .05em;
+            }
+
+            .hll-log-text {
+                flex: 1;
+                min-width: 0;
+                overflow-wrap: anywhere;
+            }
+
+            .hll-logs-footer {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 12px;
+                padding: 12px 18px;
+                border-top: 1px solid rgba(255, 255, 255, .1);
+                color: #9a9aa6;
+                font-size: 13px;
+            }
+
+            @media (max-width: 640px) {
+                .hll-log-row {
+                    flex-wrap: wrap;
+                }
+
+                .hll-log-time {
+                    flex-basis: 100%;
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    const PAGE_SIZE = 100;
+
+    const overlay = document.createElement("div");
+    overlay.id = "hll-logs-panel";
+    overlay.className = "hll-logs-overlay";
+
+    const box = document.createElement("div");
+    box.className = "hll-logs-box";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+
+    const header = document.createElement("div");
+    header.className = "hll-logs-header";
+
+    const heading = document.createElement("h3");
+    heading.textContent = "Staff logs";
+
+    const filter = document.createElement("select");
+
+    ["All", "Levels", "Completions", "Submissions", "Players"].forEach(name => {
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = name === "All" ? "All changes" : name;
+        filter.appendChild(option);
+    });
+
+    const search = document.createElement("input");
+    search.type = "search";
+    search.placeholder = "Search staff, level, player...";
+
+    const closeButton = document.createElement("button");
+    closeButton.type = "button";
+    closeButton.textContent = "Close";
+
+    header.append(heading, filter, search, closeButton);
+
+    const listElement = document.createElement("div");
+    listElement.className = "hll-logs-list";
+
+    const footer = document.createElement("div");
+    footer.className = "hll-logs-footer";
+
+    const status = document.createElement("span");
+
+    const moreButton = document.createElement("button");
+    moreButton.type = "button";
+    moreButton.className = "hll-logs-more";
+    moreButton.textContent = "Load older";
+
+    footer.append(status, moreButton);
+
+    box.append(header, listElement, footer);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    const entries = [];
+    let exhausted = false;
+
+    function onKey(event) {
+        if (event.key === "Escape") close();
+    }
+
+    function close() {
+        overlay.remove();
+        document.removeEventListener("keydown", onKey);
+
+        if (location.hash === "#logs") {
+            history.replaceState(null, "", location.pathname + location.search);
+        }
+    }
+
+    closeButton.addEventListener("click", close);
+    document.addEventListener("keydown", onKey);
+
+    overlay.addEventListener("click", event => {
+        if (event.target === overlay) close();
+    });
+
+    function render() {
+        const term = search.value.trim().toLowerCase();
+        const category = filter.value;
+
+        const visible = entries.filter(log => {
+            if (category !== "All" && logCategory(log.action) !== category) {
+                return false;
+            }
+
+            if (!term) return true;
+
+            return (
+                String(log.actor_name || "").toLowerCase().includes(term) ||
+                String(log.target_name || "").toLowerCase().includes(term) ||
+                describeLog(log).toLowerCase().includes(term)
+            );
+        });
+
+        listElement.textContent = "";
+
+        if (!visible.length) {
+            const empty = document.createElement("p");
+            empty.style.color = "#9a9aa6";
+
+            empty.textContent = entries.length
+                ? "No loaded entries match. Try \"Load older\" or change the filter."
+                : "No staff actions have been logged yet.";
+
+            listElement.appendChild(empty);
+        }
+
+        visible.forEach(log => {
+            const row = document.createElement("div");
+            row.className = "hll-log-row";
+
+            const time = document.createElement("div");
+            time.className = "hll-log-time";
+            time.textContent = new Date(log.created_at).toLocaleString();
+
+            const tag = document.createElement("span");
+            tag.className = "hll-log-tag";
+            tag.textContent = logCategory(log.action);
+
+            const text = document.createElement("div");
+            text.className = "hll-log-text";
+
+            const actor = document.createElement("strong");
+            actor.textContent = log.actor_name || "System";
+
+            text.append(actor, " " + describeLog(log));
+
+            row.append(time, tag, text);
+            listElement.appendChild(row);
+        });
+
+        status.textContent =
+            `${visible.length} shown · ${entries.length} loaded`;
+
+        moreButton.hidden = exhausted;
+    }
+
+    async function loadMore() {
+        moreButton.disabled = true;
+        moreButton.textContent = "Loading...";
+
+        const from = entries.length;
+
+        const { data, error } = await supabaseClient
+            .from("staff_logs")
+            .select("*")
+            .order("created_at", { ascending: false })
+            .range(from, from + PAGE_SIZE - 1);
+
+        moreButton.disabled = false;
+        moreButton.textContent = "Load older";
+
+        if (error) {
+            console.error("Could not load logs:", error);
+
+            listElement.textContent =
+                /staff_logs|relation|schema cache/i.test(error.message || "")
+                    ? "The logs table is not installed in the database yet."
+                    : getErrorMessage(error);
+
+            moreButton.hidden = true;
+            return;
+        }
+
+        entries.push(...(data || []));
+
+        if ((data || []).length < PAGE_SIZE) exhausted = true;
+
+        render();
+    }
+
+    filter.addEventListener("change", render);
+    search.addEventListener("input", render);
+    moreButton.addEventListener("click", loadMore);
+
+    listElement.textContent = "Loading...";
+    await loadMore();
+}
+
+// Adds a "Logs" tab to the site navigation for admins only.
+async function setupLogsTab() {
+    if (!currentUser || document.getElementById("hll-logs-tab")) return;
+
+    const { data } = await supabaseClient
+        .from("staff_members")
+        .select("role")
+        .eq("user_id", currentUser.id)
+        .maybeSingle();
+
+    if (!data || data.role !== "admin") return;
+
+    let tab = null;
+
+    // Copy an existing nav link so the tab matches the site's styling.
+    const reference = document.querySelector(
+        'a[href="players.html"], a[href="main-list.html"], nav a'
+    );
+
+    if (reference) {
+        const host = reference.closest("li") || reference;
+        const clone = host.cloneNode(true);
+
+        tab = clone.matches("a") ? clone : clone.querySelector("a");
+
+        if (tab) {
+            tab.id = "hll-logs-tab";
+            tab.href = "#logs";
+            tab.textContent = "Logs";
+            tab.classList.remove("active", "current");
+            tab.removeAttribute("aria-current");
+
+            host.insertAdjacentElement("afterend", clone);
+        }
+    }
+
+    // Fallback if the page has no nav to copy.
+    if (!tab) {
+        tab = document.createElement("a");
+        tab.id = "hll-logs-tab";
+        tab.href = "#logs";
+        tab.textContent = "Logs";
+
+        Object.assign(tab.style, {
+            position: "fixed",
+            right: "16px",
+            bottom: "16px",
+            zIndex: "9000",
+            padding: "10px 16px",
+            background: "#17171c",
+            border: "1px solid rgba(255,255,255,.2)",
+            borderRadius: "999px",
+            color: "#f2f2f5",
+            textDecoration: "none"
+        });
+
+        document.body.appendChild(tab);
+    }
+
+    tab.addEventListener("click", event => {
+        event.preventDefault();
+        openLogsPanel();
+    });
+
+    if (location.hash === "#logs") openLogsPanel();
+}
+
 // Staff-only popup listing a level's verified completions with a Remove button.
 async function openLevelCompletionsModal(level) {
     if (document.getElementById("hll-completions-modal")) return;
@@ -3407,6 +3842,11 @@ async function startHLL() {
         registerAuthListener();
         updateLoginButton();
         updateProfileSubmitButton();
+
+        // Non-blocking: only admins get the Logs tab.
+        setupLogsTab().catch(error => {
+            console.warn("Logs tab unavailable:", error);
+        });
 
         const page = pageName();
 
