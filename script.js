@@ -969,9 +969,14 @@ async function renderLevelList(listType) {
 
     render(levels);
 
-    if (await isCurrentUserStaff()) {
-        setupLevelContextMenu(list, levels);
-        await setupRemovedLevelsPanel(list, listType);
+    const staffInfo = await getStaffInfo();
+
+    if (staffInfo) {
+        setupLevelContextMenu(list, levels, staffInfo);
+
+        if (staffCan(staffInfo, "manage_levels")) {
+            await setupRemovedLevelsPanel(list, listType);
+        }
     }
 
     try {
@@ -1064,6 +1069,55 @@ async function isCurrentUserStaff() {
         .maybeSingle();
 
     return !!data && ["admin", "moderator"].includes(data.role);
+}
+
+// Cached per user: { role, permissions } for admins and moderators, else null.
+let staffInfoCache = { userId: null, promise: null };
+
+function getStaffInfo() {
+    const userId = currentUser?.id || null;
+
+    if (!userId) return Promise.resolve(null);
+
+    if (staffInfoCache.userId !== userId || !staffInfoCache.promise) {
+        staffInfoCache = {
+            userId,
+            promise: (async () => {
+                let { data, error } = await supabaseClient
+                    .from("staff_members")
+                    .select("role, permissions")
+                    .eq("user_id", userId)
+                    .maybeSingle();
+
+                if (error) {
+                    // The permissions column is not installed yet.
+                    const retry = await supabaseClient
+                        .from("staff_members")
+                        .select("role")
+                        .eq("user_id", userId)
+                        .maybeSingle();
+
+                    data = retry.data ? { ...retry.data, permissions: null } : null;
+                }
+
+                if (!data || !["admin", "moderator"].includes(data.role)) {
+                    return null;
+                }
+
+                return data;
+            })()
+        };
+    }
+
+    return staffInfoCache.promise;
+}
+
+// Admins can do everything. Moderators need the specific permission ticked.
+function staffCan(info, permission) {
+    if (!info) return false;
+    if (info.role === "admin") return true;
+    if (!info.permissions) return true; // permissions not configured yet
+    return info.permissions[permission] === true;
 }
 
 // Generic right-click / long-press menu for staff.
@@ -1226,12 +1280,27 @@ function describeLog(log) {
         case "player_restored":
             return `restored ${target} to the leaderboard`;
 
+        case "role_changed": {
+            const permissions = d.permissions
+                ? Object.entries(d.permissions)
+                    .filter(([, allowed]) => allowed === true)
+                    .map(([key]) => key.replace(/_/g, " "))
+                : [];
+
+            return `changed ${target}'s role from ${d.old_role || "player"} ` +
+                `to ${d.new_role || "player"}` +
+                (d.new_role === "moderator"
+                    ? ` (allowed: ${permissions.length ? permissions.join(", ") : "nothing"})`
+                    : "");
+        }
+
         default:
             return `${log.action}: ${target}`;
     }
 }
 
 function logCategory(action) {
+    if (String(action).startsWith("role")) return "Roles";
     if (String(action).startsWith("level_submission")) return "Submissions";
     if (String(action).startsWith("level")) return "Levels";
     if (String(action).startsWith("completion")) return "Completions";
@@ -1384,7 +1453,7 @@ async function openLogsPanel() {
 
     const filter = document.createElement("select");
 
-    ["All", "Levels", "Completions", "Submissions", "Players"].forEach(name => {
+    ["All", "Levels", "Completions", "Submissions", "Players", "Roles"].forEach(name => {
         const option = document.createElement("option");
         option.value = name;
         option.textContent = name === "All" ? "All changes" : name;
@@ -1611,6 +1680,580 @@ async function setupLogsTab() {
     });
 
     if (location.hash === "#logs") openLogsPanel();
+}
+
+/* ---------- Roles (admin only) ---------- */
+
+const STAFF_PERMISSIONS = [
+    {
+        key: "review_completions",
+        label: "Review completions",
+        hint: "Approve or reject submitted completions."
+    },
+    {
+        key: "remove_completions",
+        label: "Remove completions",
+        hint: "Delete verified completions from a level."
+    },
+    {
+        key: "manage_levels",
+        label: "Manage levels",
+        hint: "Move, remove and restore levels."
+    },
+    {
+        key: "manage_players",
+        label: "Manage players",
+        hint: "Edit player points and hide players from the leaderboard."
+    }
+];
+
+function roleLabel(role) {
+    if (role === "admin") return "Admin";
+    if (role === "moderator") return "Moderator";
+    return "Player";
+}
+
+async function openRolesPanel() {
+    if (document.getElementById("hll-roles-panel")) return;
+
+    if (!document.getElementById("hll-roles-styles")) {
+        const style = document.createElement("style");
+        style.id = "hll-roles-styles";
+        style.textContent = `
+            .hll-roles-overlay {
+                position: fixed;
+                inset: 0;
+                z-index: 10000;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 16px;
+                background: rgba(0, 0, 0, .7);
+            }
+
+            .hll-roles-box {
+                display: flex;
+                flex-direction: column;
+                width: min(640px, 100%);
+                height: min(80vh, 680px);
+                background: #17171c;
+                border: 1px solid rgba(255, 255, 255, .14);
+                border-radius: 12px;
+                box-shadow: 0 16px 48px rgba(0, 0, 0, .6);
+                color: #f2f2f5;
+            }
+
+            .hll-roles-header {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                gap: 10px;
+                padding: 14px 18px;
+                border-bottom: 1px solid rgba(255, 255, 255, .1);
+            }
+
+            .hll-roles-header h3 {
+                margin: 0 auto 0 0;
+                font-size: 17px;
+            }
+
+            .hll-roles-header input,
+            .hll-roles-body select {
+                padding: 8px 10px;
+                background: #0f0f13;
+                border: 1px solid rgba(255, 255, 255, .16);
+                border-radius: 8px;
+                color: inherit;
+                font: inherit;
+            }
+
+            .hll-roles-header button,
+            .hll-roles-back {
+                padding: 7px 14px;
+                background: rgba(255, 255, 255, .08);
+                border: 0;
+                border-radius: 8px;
+                color: inherit;
+                font: inherit;
+                cursor: pointer;
+            }
+
+            .hll-roles-body {
+                flex: 1;
+                padding: 8px 18px 18px;
+                overflow-y: auto;
+            }
+
+            .hll-roles-row {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                width: 100%;
+                padding: 12px 8px;
+                background: none;
+                border: 0;
+                border-bottom: 1px solid rgba(255, 255, 255, .07);
+                color: inherit;
+                font: inherit;
+                text-align: left;
+                cursor: pointer;
+            }
+
+            .hll-roles-row:hover {
+                background: rgba(255, 255, 255, .05);
+            }
+
+            .hll-roles-name {
+                flex: 1;
+                min-width: 0;
+                overflow-wrap: anywhere;
+            }
+
+            .hll-roles-badge {
+                padding: 2px 10px;
+                border-radius: 999px;
+                background: rgba(255, 255, 255, .08);
+                color: #b9b9c4;
+                font-size: 12px;
+            }
+
+            .hll-roles-badge-admin {
+                background: rgba(255, 107, 107, .16);
+                color: #ff8f8f;
+            }
+
+            .hll-roles-badge-moderator {
+                background: rgba(127, 180, 255, .16);
+                color: #7fb4ff;
+            }
+
+            .hll-roles-form {
+                display: flex;
+                flex-direction: column;
+                gap: 14px;
+                margin-top: 16px;
+            }
+
+            .hll-roles-form > label {
+                font-weight: 600;
+            }
+
+            .hll-roles-perms {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .hll-roles-perms[hidden] {
+                display: none;
+            }
+
+            .hll-roles-perm {
+                display: flex;
+                align-items: flex-start;
+                gap: 10px;
+                padding: 10px 12px;
+                background: rgba(255, 255, 255, .04);
+                border-radius: 8px;
+                cursor: pointer;
+            }
+
+            .hll-roles-perm small {
+                display: block;
+                color: #9a9aa6;
+            }
+
+            .hll-roles-note {
+                margin: 0;
+                color: #9a9aa6;
+                font-size: 13px;
+            }
+
+            .hll-roles-save {
+                align-self: flex-start;
+                padding: 9px 18px;
+                background: #42d392;
+                border: 0;
+                border-radius: 8px;
+                color: #0d0d0f;
+                font: inherit;
+                font-weight: 600;
+                cursor: pointer;
+            }
+
+            .hll-roles-save:disabled {
+                opacity: .5;
+                cursor: not-allowed;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    const overlay = document.createElement("div");
+    overlay.id = "hll-roles-panel";
+    overlay.className = "hll-roles-overlay";
+
+    const box = document.createElement("div");
+    box.className = "hll-roles-box";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+
+    const header = document.createElement("div");
+    header.className = "hll-roles-header";
+
+    const heading = document.createElement("h3");
+    heading.textContent = "Staff roles";
+
+    const search = document.createElement("input");
+    search.type = "search";
+    search.placeholder = "Search players...";
+
+    const closeButton = document.createElement("button");
+    closeButton.type = "button";
+    closeButton.textContent = "Close";
+
+    header.append(heading, search, closeButton);
+
+    const body = document.createElement("div");
+    body.className = "hll-roles-body";
+
+    box.append(header, body);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    let users = [];
+
+    function onKey(event) {
+        if (event.key === "Escape") close();
+    }
+
+    function close() {
+        overlay.remove();
+        document.removeEventListener("keydown", onKey);
+
+        if (location.hash === "#roles") {
+            history.replaceState(null, "", location.pathname + location.search);
+        }
+    }
+
+    closeButton.addEventListener("click", close);
+    document.addEventListener("keydown", onKey);
+
+    overlay.addEventListener("click", event => {
+        if (event.target === overlay) close();
+    });
+
+    function sortUsers() {
+        const order = { admin: 0, moderator: 1 };
+
+        users.sort((a, b) =>
+            (order[a.role] ?? 2) - (order[b.role] ?? 2) ||
+            String(a.username || "").localeCompare(String(b.username || ""))
+        );
+    }
+
+    function renderList() {
+        heading.textContent = "Staff roles";
+        search.hidden = false;
+        body.textContent = "";
+
+        const term = search.value.trim().toLowerCase();
+
+        const visible = users.filter(user =>
+            !term ||
+            String(user.username || "").toLowerCase().includes(term) ||
+            roleLabel(user.role).toLowerCase().includes(term)
+        );
+
+        if (!visible.length) {
+            const empty = document.createElement("p");
+            empty.style.color = "#9a9aa6";
+            empty.textContent = "No players found.";
+            body.appendChild(empty);
+            return;
+        }
+
+        visible.forEach(user => {
+            const row = document.createElement("button");
+            row.type = "button";
+            row.className = "hll-roles-row";
+
+            const name = document.createElement("span");
+            name.className = "hll-roles-name";
+            name.textContent =
+                (user.username || "Player") +
+                (user.id === currentUser?.id ? " (you)" : "");
+
+            const badge = document.createElement("span");
+            badge.className = `hll-roles-badge hll-roles-badge-${user.role || "player"}`;
+            badge.textContent = roleLabel(user.role);
+
+            const chevron = document.createElement("span");
+            chevron.setAttribute("aria-hidden", "true");
+            chevron.textContent = "›";
+
+            row.append(name, badge, chevron);
+            row.addEventListener("click", () => renderEditor(user));
+
+            body.appendChild(row);
+        });
+    }
+
+    function renderEditor(user) {
+        heading.textContent = user.username || "Player";
+        search.hidden = true;
+        body.textContent = "";
+
+        const isSelf = user.id === currentUser?.id;
+
+        const back = document.createElement("button");
+        back.type = "button";
+        back.className = "hll-roles-back";
+        back.textContent = "← All players";
+        back.addEventListener("click", renderList);
+
+        const form = document.createElement("div");
+        form.className = "hll-roles-form";
+
+        const roleLabelElement = document.createElement("label");
+        roleLabelElement.htmlFor = "hll-roles-select";
+        roleLabelElement.textContent = "Role";
+
+        const select = document.createElement("select");
+        select.id = "hll-roles-select";
+
+        [
+            ["none", "Player (no staff access)"],
+            ["moderator", "Moderator"],
+            ["admin", "Admin"]
+        ].forEach(([value, text]) => {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = text;
+            select.appendChild(option);
+        });
+
+        select.value = user.role || "none";
+        select.disabled = isSelf;
+
+        const permissionBox = document.createElement("div");
+        permissionBox.className = "hll-roles-perms";
+
+        const checks = {};
+
+        STAFF_PERMISSIONS.forEach(permission => {
+            const label = document.createElement("label");
+            label.className = "hll-roles-perm";
+
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.checked =
+                user.role === "admin" || user.permissions?.[permission.key] === true;
+
+            const text = document.createElement("div");
+
+            const title = document.createElement("strong");
+            title.textContent = permission.label;
+
+            const hint = document.createElement("small");
+            hint.textContent = permission.hint;
+
+            text.append(title, hint);
+            label.append(checkbox, text);
+
+            checks[permission.key] = checkbox;
+            permissionBox.appendChild(label);
+        });
+
+        const note = document.createElement("p");
+        note.className = "hll-roles-note";
+
+        function refresh() {
+            const role = select.value;
+            const admin = role === "admin";
+
+            permissionBox.hidden = role === "none";
+
+            Object.values(checks).forEach(checkbox => {
+                if (admin) checkbox.checked = true;
+                checkbox.disabled = admin || isSelf;
+            });
+
+            if (isSelf) {
+                note.textContent = "You cannot change your own role.";
+            } else if (admin) {
+                note.textContent =
+                    "Admins can do everything, including managing roles and viewing the logs.";
+            } else if (role === "moderator") {
+                note.textContent =
+                    "Tick what this moderator is allowed to do. Only admins see the Logs and Roles tabs.";
+            } else {
+                note.textContent = "This player has no staff access.";
+            }
+        }
+
+        select.addEventListener("change", refresh);
+        refresh();
+
+        const status = document.createElement("p");
+        status.className = "hll-roles-note";
+
+        const save = document.createElement("button");
+        save.type = "button";
+        save.className = "hll-roles-save";
+        save.textContent = "Save changes";
+        save.disabled = isSelf;
+
+        save.addEventListener("click", async () => {
+            const role = select.value;
+            const name = user.username || "this player";
+
+            if (role === (user.role || "none") && role !== "moderator") {
+                status.style.color = "";
+                status.textContent = "Nothing to change.";
+                return;
+            }
+
+            if (role === "admin" && user.role !== "admin" && !confirm(
+                `Make ${name} an admin?\n\n` +
+                "Admins can manage roles, see the logs and do everything moderators can."
+            )) return;
+
+            if (role === "none" && user.role && !confirm(
+                `Remove ${name}'s staff access?`
+            )) return;
+
+            const permissions = {};
+
+            STAFF_PERMISSIONS.forEach(permission => {
+                permissions[permission.key] =
+                    role === "admin" ? true : checks[permission.key].checked;
+            });
+
+            save.disabled = true;
+            save.textContent = "Saving...";
+            status.style.color = "";
+            status.textContent = "";
+
+            const { error } = await supabaseClient.rpc("admin_set_staff_role", {
+                p_user_id: user.id,
+                p_role: role,
+                p_permissions: permissions
+            });
+
+            save.disabled = false;
+            save.textContent = "Save changes";
+
+            if (error) {
+                console.error("Role change failed:", error);
+                status.style.color = "#ff6b6b";
+                status.textContent = getErrorMessage(error);
+                return;
+            }
+
+            user.role = role === "none" ? null : role;
+            user.permissions = role === "none" ? {} : permissions;
+            sortUsers();
+
+            status.style.color = "#42d392";
+            status.textContent = "Saved. The change applies the next time they load the site.";
+        });
+
+        form.append(
+            roleLabelElement,
+            select,
+            note,
+            permissionBox,
+            save,
+            status
+        );
+
+        body.append(back, form);
+    }
+
+    search.addEventListener("input", renderList);
+
+    body.textContent = "Loading...";
+
+    const { data, error } = await supabaseClient.rpc("admin_list_users");
+
+    if (error) {
+        console.error("Could not load users:", error);
+
+        body.textContent =
+            /admin_list_users|function|schema cache/i.test(error.message || "")
+                ? "Role management is not installed in the database yet."
+                : getErrorMessage(error);
+
+        return;
+    }
+
+    users = data || [];
+    sortUsers();
+    renderList();
+}
+
+// Adds a "Roles" tab to the site navigation for admins only.
+async function setupRolesTab() {
+    if (!currentUser || document.getElementById("hll-roles-tab")) return;
+
+    const info = await getStaffInfo();
+
+    if (!info || info.role !== "admin") return;
+
+    let tab = null;
+
+    // Copy a nav link (the Logs tab if present) so the tab matches the site's styling.
+    const reference =
+        document.getElementById("hll-logs-tab") ||
+        document.querySelector('a[href="players.html"], a[href="main-list.html"], nav a');
+
+    if (reference) {
+        const host = reference.closest("li") || reference;
+        const clone = host.cloneNode(true);
+
+        tab = clone.matches("a") ? clone : clone.querySelector("a");
+
+        if (tab) {
+            tab.id = "hll-roles-tab";
+            tab.href = "#roles";
+            tab.textContent = "Roles";
+            tab.classList.remove("active", "current");
+            tab.removeAttribute("aria-current");
+
+            host.insertAdjacentElement("afterend", clone);
+        }
+    }
+
+    // Fallback if the page has no nav to copy.
+    if (!tab) {
+        tab = document.createElement("a");
+        tab.id = "hll-roles-tab";
+        tab.href = "#roles";
+        tab.textContent = "Roles";
+
+        Object.assign(tab.style, {
+            position: "fixed",
+            right: "16px",
+            bottom: "64px",
+            zIndex: "9000",
+            padding: "10px 16px",
+            background: "#17171c",
+            border: "1px solid rgba(255,255,255,.2)",
+            borderRadius: "999px",
+            color: "#f2f2f5",
+            textDecoration: "none"
+        });
+
+        document.body.appendChild(tab);
+    }
+
+    tab.addEventListener("click", event => {
+        event.preventDefault();
+        openRolesPanel();
+    });
+
+    if (location.hash === "#roles") openRolesPanel();
 }
 
 // Staff-only popup listing a level's verified completions with a Remove button.
@@ -1892,7 +2535,12 @@ async function openLevelCompletionsModal(level) {
 }
 
 // Staff-only: right-click a level to move it up or down the list.
-function setupLevelContextMenu(list, levels) {
+function setupLevelContextMenu(list, levels, staffInfo) {
+    // Nothing to show a moderator who has neither permission.
+    if (!staffCan(staffInfo, "manage_levels") && !staffCan(staffInfo, "remove_completions")) {
+        return;
+    }
+
     async function moveLevel(level, direction) {
         const { error } = await supabaseClient.rpc("staff_move_level", {
             p_level_id: level.id,
@@ -1943,11 +2591,11 @@ function setupLevelContextMenu(list, levels) {
         level => ({
             title: `#${level.rank} ${level.name || "Level"}`,
             entries: [
-                { label: "Move up", onClick: () => moveLevel(level, "up") },
-                { label: "Move down", onClick: () => moveLevel(level, "down") },
-                { label: "Completions…", onClick: () => openLevelCompletionsModal(level) },
-                { label: "Remove level", danger: true, onClick: () => removeLevel(level) }
-            ]
+                { label: "Move up", perm: "manage_levels", onClick: () => moveLevel(level, "up") },
+                { label: "Move down", perm: "manage_levels", onClick: () => moveLevel(level, "down") },
+                { label: "Completions…", perm: "remove_completions", onClick: () => openLevelCompletionsModal(level) },
+                { label: "Remove level", perm: "manage_levels", danger: true, onClick: () => removeLevel(level) }
+            ].filter(entry => staffCan(staffInfo, entry.perm))
         })
     );
 }
@@ -2558,7 +3206,9 @@ async function renderPlayersList() {
 
     render(players);
 
-    if (isStaff) setupPlayerContextMenu(list, players);
+    if (isStaff && staffCan(await getStaffInfo(), "manage_players")) {
+        setupPlayerContextMenu(list, players);
+    }
 
     if (search && search.dataset.hllPlayersSearchBound !== "true") {
         search.dataset.hllPlayersSearchBound = "true";
@@ -3843,10 +4493,15 @@ async function startHLL() {
         updateLoginButton();
         updateProfileSubmitButton();
 
-        // Non-blocking: only admins get the Logs tab.
-        setupLogsTab().catch(error => {
-            console.warn("Logs tab unavailable:", error);
-        });
+        // Non-blocking: only admins get the Logs and Roles tabs.
+        setupLogsTab()
+            .catch(error => {
+                console.warn("Logs tab unavailable:", error);
+            })
+            .then(() => setupRolesTab())
+            .catch(error => {
+                console.warn("Roles tab unavailable:", error);
+            });
 
         const page = pageName();
 
