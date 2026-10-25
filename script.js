@@ -971,6 +971,7 @@ async function renderLevelList(listType) {
 
     if (await isCurrentUserStaff()) {
         setupLevelContextMenu(list, levels);
+        await setupRemovedLevelsPanel(list, listType);
     }
 
     try {
@@ -1198,6 +1199,30 @@ function setupLevelContextMenu(list, levels) {
         location.reload();
     }
 
+    async function removeLevel(level) {
+        if (!confirm(
+            `Remove "${level.name}" (#${level.rank}) from the list?\n\n` +
+            "Levels below it move up one place. You can restore it later " +
+            "from the \"Removed levels\" panel under the list."
+        )) return;
+
+        const { error } = await supabaseClient.rpc("staff_remove_level", {
+            p_level_id: level.id
+        });
+
+        if (error) {
+            console.error("Remove level failed:", error);
+            alert("Could not remove this level:\n" + getErrorMessage(error));
+            return;
+        }
+
+        try {
+            sessionStorage.setItem("hllScrollY", String(window.scrollY));
+        } catch { /* storage unavailable */ }
+
+        location.reload();
+    }
+
     bindStaffContextMenu(
         list,
         ".hll-level-card",
@@ -1206,10 +1231,160 @@ function setupLevelContextMenu(list, levels) {
             title: `#${level.rank} ${level.name || "Level"}`,
             entries: [
                 { label: "Move up", onClick: () => moveLevel(level, "up") },
-                { label: "Move down", onClick: () => moveLevel(level, "down") }
+                { label: "Move down", onClick: () => moveLevel(level, "down") },
+                { label: "Remove level", danger: true, onClick: () => removeLevel(level) }
             ]
         })
     );
+}
+
+// Staff-only panel under the list showing removed levels with a Restore button.
+async function setupRemovedLevelsPanel(list, listType) {
+    if (!list || document.getElementById("hll-removed-panel")) return;
+
+    if (!document.getElementById("hll-removed-panel-styles")) {
+        const style = document.createElement("style");
+        style.id = "hll-removed-panel-styles";
+        style.textContent = `
+            .hll-removed-panel {
+                margin: 24px 0;
+                padding: 12px 16px;
+                background: rgba(255, 255, 255, .04);
+                border: 1px solid rgba(255, 255, 255, .12);
+                border-radius: 10px;
+            }
+
+            .hll-removed-panel summary {
+                cursor: pointer;
+                font-weight: 600;
+            }
+
+            .hll-removed-body {
+                margin-top: 12px;
+            }
+
+            .hll-removed-row {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                padding: 10px 0;
+                border-top: 1px solid rgba(255, 255, 255, .08);
+            }
+
+            .hll-removed-row small {
+                display: block;
+                color: #9a9aa6;
+            }
+
+            .hll-removed-row button {
+                padding: 8px 14px;
+                border: 0;
+                border-radius: 8px;
+                background: #42d392;
+                color: #0d0d0f;
+                font: inherit;
+                font-weight: 600;
+                cursor: pointer;
+            }
+
+            .hll-removed-row button:disabled {
+                opacity: .6;
+                cursor: wait;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    const panel = document.createElement("details");
+    panel.id = "hll-removed-panel";
+    panel.className = "hll-removed-panel";
+
+    const summary = document.createElement("summary");
+    summary.textContent = "Removed levels (staff only)";
+
+    const body = document.createElement("div");
+    body.className = "hll-removed-body";
+    body.textContent = "Loading...";
+
+    panel.append(summary, body);
+    list.insertAdjacentElement("afterend", panel);
+
+    const { data, error } = await supabaseClient.rpc("staff_list_removed_levels");
+
+    if (error) {
+        console.error("Removed levels failed to load:", error);
+
+        body.textContent =
+            /staff_list_removed_levels|function|schema cache/i.test(error.message || "")
+                ? "Level removal is not installed in the database yet."
+                : getErrorMessage(error);
+
+        return;
+    }
+
+    const removed = (data || []).filter(level => level.list_type === listType);
+
+    summary.textContent = `Removed levels (staff only) · ${removed.length}`;
+
+    if (!removed.length) {
+        body.textContent = "No removed levels in this list.";
+        return;
+    }
+
+    body.textContent = "";
+
+    removed.forEach(level => {
+        const row = document.createElement("div");
+        row.className = "hll-removed-row";
+
+        const info = document.createElement("div");
+
+        const name = document.createElement("strong");
+        name.textContent = level.name || "Unnamed level";
+
+        const meta = document.createElement("small");
+        meta.textContent =
+            `${level.creator || "Unknown creator"}` +
+            (level.removed_rank ? ` · was #${level.removed_rank}` : "") +
+            (level.removed_at ? ` · removed ${formatDate(level.removed_at)}` : "");
+
+        info.append(name, meta);
+
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "Restore";
+
+        button.addEventListener("click", async () => {
+            if (!confirm(
+                `Restore "${level.name}"` +
+                (level.removed_rank ? ` to #${level.removed_rank}` : "") +
+                "?\n\nLevels at or below that position move down one place."
+            )) return;
+
+            button.disabled = true;
+            button.textContent = "Restoring...";
+
+            const { error: restoreError } = await supabaseClient.rpc(
+                "staff_restore_level",
+                { p_level_id: level.id }
+            );
+
+            if (restoreError) {
+                console.error("Restore level failed:", restoreError);
+                alert("Could not restore this level:\n" + getErrorMessage(restoreError));
+
+                button.disabled = false;
+                button.textContent = "Restore";
+                return;
+            }
+
+            location.reload();
+        });
+
+        row.append(info, button);
+        body.appendChild(row);
+    });
 }
 
 // Staff-only right-click (or long-press) menu on the player leaderboard.
