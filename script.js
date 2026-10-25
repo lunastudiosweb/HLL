@@ -969,6 +969,19 @@ async function renderLevelList(listType) {
 
     render(levels);
 
+    if (await isCurrentUserStaff()) {
+        setupLevelContextMenu(list, levels);
+    }
+
+    try {
+        const savedScroll = sessionStorage.getItem("hllScrollY");
+
+        if (savedScroll !== null) {
+            sessionStorage.removeItem("hllScrollY");
+            window.scrollTo(0, Number(savedScroll) || 0);
+        }
+    } catch { /* storage unavailable */ }
+
     if (search && search.dataset.hllSearchBound !== "true") {
         search.dataset.hllSearchBound = "true";
 
@@ -989,6 +1002,215 @@ async function renderLevelList(listType) {
 /* =========================================================
    9. PLAYER LEADERBOARD
    ========================================================= */
+
+function ensureStaffMenuStyles() {
+    if (document.getElementById("hll-staff-menu-styles")) return;
+
+    const style = document.createElement("style");
+    style.id = "hll-staff-menu-styles";
+    style.textContent = `
+        .hll-staff-menu {
+            position: fixed;
+            z-index: 9999;
+            min-width: 230px;
+            padding: 6px;
+            background: #17171c;
+            border: 1px solid rgba(255, 255, 255, .14);
+            border-radius: 10px;
+            box-shadow: 0 12px 32px rgba(0, 0, 0, .55);
+            font-size: 14px;
+        }
+
+        .hll-staff-menu-title {
+            padding: 6px 10px;
+            color: #9a9aa6;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+        }
+
+        .hll-staff-menu button {
+            display: block;
+            width: 100%;
+            padding: 9px 10px;
+            background: none;
+            border: 0;
+            border-radius: 6px;
+            color: #f2f2f5;
+            text-align: left;
+            font: inherit;
+            cursor: pointer;
+        }
+
+        .hll-staff-menu button:hover {
+            background: rgba(255, 255, 255, .08);
+        }
+
+        .hll-staff-menu button.danger {
+            color: #ff6b6b;
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+async function isCurrentUserStaff() {
+    if (!currentUser) return false;
+
+    const { data } = await supabaseClient
+        .from("staff_members")
+        .select("role")
+        .eq("user_id", currentUser.id)
+        .maybeSingle();
+
+    return !!data && ["admin", "moderator"].includes(data.role);
+}
+
+// Generic right-click / long-press menu for staff.
+// buildMenu(item) must return { title, entries: [{ label, onClick, danger }] }
+function bindStaffContextMenu(list, cardSelector, getItem, buildMenu) {
+    if (!list || list.dataset.hllStaffMenuBound === "true") return;
+
+    list.dataset.hllStaffMenuBound = "true";
+
+    ensureStaffMenuStyles();
+
+    let menu = null;
+
+    function closeMenu() {
+        if (menu) menu.remove();
+        menu = null;
+    }
+
+    function openMenu(x, y, item) {
+        closeMenu();
+
+        const { title, entries } = buildMenu(item);
+
+        menu = document.createElement("div");
+        menu.className = "hll-staff-menu";
+        menu.setAttribute("role", "menu");
+
+        const heading = document.createElement("div");
+        heading.className = "hll-staff-menu-title";
+        heading.textContent = title;
+        menu.appendChild(heading);
+
+        entries.forEach(entry => {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.textContent = entry.label;
+            if (entry.danger) button.className = "danger";
+
+            button.addEventListener("click", () => {
+                closeMenu();
+                entry.onClick();
+            });
+
+            menu.appendChild(button);
+        });
+
+        document.body.appendChild(menu);
+
+        const rect = menu.getBoundingClientRect();
+
+        menu.style.left =
+            Math.max(8, Math.min(x, window.innerWidth - rect.width - 8)) + "px";
+
+        menu.style.top =
+            Math.max(8, Math.min(y, window.innerHeight - rect.height - 8)) + "px";
+    }
+
+    function itemFromEvent(event) {
+        const card = event.target.closest?.(cardSelector);
+
+        return card ? getItem(card) : null;
+    }
+
+    list.addEventListener("contextmenu", event => {
+        const item = itemFromEvent(event);
+
+        if (!item) return;
+
+        event.preventDefault();
+        openMenu(event.clientX, event.clientY, item);
+    });
+
+    // Long-press for touch screens.
+    let pressTimer = null;
+    let longPressed = false;
+
+    list.addEventListener("touchstart", event => {
+        const item = itemFromEvent(event);
+
+        if (!item) return;
+
+        longPressed = false;
+
+        const touch = event.touches[0];
+
+        pressTimer = setTimeout(() => {
+            longPressed = true;
+            openMenu(touch.clientX, touch.clientY, item);
+        }, 600);
+    }, { passive: true });
+
+    ["touchend", "touchmove", "touchcancel"].forEach(name => {
+        list.addEventListener(name, () => clearTimeout(pressTimer), { passive: true });
+    });
+
+    list.addEventListener("click", event => {
+        if (longPressed) {
+            event.preventDefault();
+            longPressed = false;
+        }
+    });
+
+    document.addEventListener("click", event => {
+        if (menu && !menu.contains(event.target)) closeMenu();
+    });
+
+    document.addEventListener("keydown", event => {
+        if (event.key === "Escape") closeMenu();
+    });
+
+    window.addEventListener("scroll", closeMenu, { passive: true });
+    window.addEventListener("resize", closeMenu);
+}
+
+// Staff-only: right-click a level to move it up or down the list.
+function setupLevelContextMenu(list, levels) {
+    async function moveLevel(level, direction) {
+        const { error } = await supabaseClient.rpc("staff_move_level", {
+            p_level_id: level.id,
+            p_direction: direction
+        });
+
+        if (error) {
+            console.error("Move level failed:", error);
+            alert("Could not move this level:\n" + getErrorMessage(error));
+            return;
+        }
+
+        try {
+            sessionStorage.setItem("hllScrollY", String(window.scrollY));
+        } catch { /* storage unavailable */ }
+
+        location.reload();
+    }
+
+    bindStaffContextMenu(
+        list,
+        ".hll-level-card",
+        card => levels.find(level => String(level.id) === card.dataset.levelId) || null,
+        level => ({
+            title: `#${level.rank} ${level.name || "Level"}`,
+            entries: [
+                { label: "Move up", onClick: () => moveLevel(level, "up") },
+                { label: "Move down", onClick: () => moveLevel(level, "down") }
+            ]
+        })
+    );
+}
 
 // Staff-only right-click (or long-press) menu on the player leaderboard.
 function setupPlayerContextMenu(list, players) {
