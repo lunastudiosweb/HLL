@@ -1178,6 +1178,284 @@ function bindStaffContextMenu(list, cardSelector, getItem, buildMenu) {
     window.addEventListener("resize", closeMenu);
 }
 
+// Staff-only popup listing a level's verified completions with a Remove button.
+async function openLevelCompletionsModal(level) {
+    if (document.getElementById("hll-completions-modal")) return;
+
+    if (!document.getElementById("hll-completions-modal-styles")) {
+        const style = document.createElement("style");
+        style.id = "hll-completions-modal-styles";
+        style.textContent = `
+            .hll-modal-overlay {
+                position: fixed;
+                inset: 0;
+                z-index: 10000;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 16px;
+                background: rgba(0, 0, 0, .65);
+            }
+
+            .hll-modal-box {
+                display: flex;
+                flex-direction: column;
+                width: min(560px, 100%);
+                max-height: 80vh;
+                background: #17171c;
+                border: 1px solid rgba(255, 255, 255, .14);
+                border-radius: 12px;
+                box-shadow: 0 16px 48px rgba(0, 0, 0, .6);
+                color: #f2f2f5;
+            }
+
+            .hll-modal-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                padding: 16px 18px;
+                border-bottom: 1px solid rgba(255, 255, 255, .1);
+            }
+
+            .hll-modal-header h3 {
+                margin: 0;
+                font-size: 17px;
+            }
+
+            .hll-modal-close {
+                padding: 6px 12px;
+                background: rgba(255, 255, 255, .08);
+                border: 0;
+                border-radius: 8px;
+                color: inherit;
+                font: inherit;
+                cursor: pointer;
+            }
+
+            .hll-modal-body {
+                padding: 6px 18px 16px;
+                overflow-y: auto;
+            }
+
+            .hll-completion-row {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                padding: 12px 0;
+                border-bottom: 1px solid rgba(255, 255, 255, .08);
+            }
+
+            .hll-completion-row:last-child {
+                border-bottom: 0;
+            }
+
+            .hll-completion-row small {
+                display: block;
+                color: #9a9aa6;
+            }
+
+            .hll-completion-row a {
+                color: #7fb4ff;
+            }
+
+            .hll-completion-remove {
+                padding: 8px 14px;
+                border: 0;
+                border-radius: 8px;
+                background: #ff6b6b;
+                color: #0d0d0f;
+                font: inherit;
+                font-weight: 600;
+                cursor: pointer;
+            }
+
+            .hll-completion-remove:disabled {
+                opacity: .6;
+                cursor: wait;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    const overlay = document.createElement("div");
+    overlay.id = "hll-completions-modal";
+    overlay.className = "hll-modal-overlay";
+
+    const box = document.createElement("div");
+    box.className = "hll-modal-box";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+
+    const header = document.createElement("div");
+    header.className = "hll-modal-header";
+
+    const heading = document.createElement("h3");
+    heading.textContent = `Completions · ${level.name || "Level"}`;
+
+    const closeButton = document.createElement("button");
+    closeButton.type = "button";
+    closeButton.className = "hll-modal-close";
+    closeButton.textContent = "Close";
+
+    header.append(heading, closeButton);
+
+    const body = document.createElement("div");
+    body.className = "hll-modal-body";
+    body.textContent = "Loading...";
+
+    box.append(header, body);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    function onKey(event) {
+        if (event.key === "Escape") close();
+    }
+
+    function close() {
+        overlay.remove();
+        document.removeEventListener("keydown", onKey);
+    }
+
+    closeButton.addEventListener("click", close);
+    document.addEventListener("keydown", onKey);
+
+    overlay.addEventListener("click", event => {
+        if (event.target === overlay) close();
+    });
+
+    const { data: completions, error } = await supabaseClient
+        .from("completions")
+        .select("id, user_id, submission_id, verified_at")
+        .eq("level_id", level.id)
+        .order("verified_at", { ascending: false });
+
+    if (error) {
+        console.error("Could not load completions:", error);
+        body.textContent = getErrorMessage(error);
+        return;
+    }
+
+    let remaining = (completions || []).length;
+
+    function updateHeading() {
+        heading.textContent =
+            `Completions · ${level.name || "Level"} (${remaining})`;
+    }
+
+    function showEmpty() {
+        body.textContent = "No verified completions for this level.";
+    }
+
+    updateHeading();
+
+    if (!remaining) {
+        showEmpty();
+        return;
+    }
+
+    const userIds = [...new Set(completions.map(item => item.user_id))];
+
+    const { data: profiles } = await supabaseClient
+        .from("profiles")
+        .select("id, username")
+        .in("id", userIds);
+
+    const names = Object.fromEntries(
+        (profiles || []).map(profile => [profile.id, profile.username])
+    );
+
+    // Evidence links are optional: they only show if staff may read the submissions.
+    const evidence = {};
+    const submissionIds = completions
+        .map(item => item.submission_id)
+        .filter(Boolean);
+
+    if (submissionIds.length) {
+        const { data: submissions } = await supabaseClient
+            .from("completion_submissions")
+            .select("id, evidence_url")
+            .in("id", submissionIds);
+
+        (submissions || []).forEach(submission => {
+            evidence[submission.id] = submission.evidence_url;
+        });
+    }
+
+    body.textContent = "";
+
+    completions.forEach(completion => {
+        const row = document.createElement("div");
+        row.className = "hll-completion-row";
+
+        const info = document.createElement("div");
+
+        const nameLink = document.createElement("a");
+        nameLink.href = `profile.html?id=${encodeURIComponent(completion.user_id)}`;
+        nameLink.textContent = names[completion.user_id] || "Player";
+
+        const meta = document.createElement("small");
+        meta.textContent = `Verified ${formatDate(completion.verified_at)}`;
+
+        info.append(nameLink, meta);
+
+        const evidenceUrl = evidence[completion.submission_id];
+
+        if (evidenceUrl && validHttpUrl(evidenceUrl)) {
+            const evidenceLink = document.createElement("a");
+            evidenceLink.href = evidenceUrl;
+            evidenceLink.target = "_blank";
+            evidenceLink.rel = "noopener noreferrer";
+            evidenceLink.textContent = "View evidence";
+
+            const evidenceLine = document.createElement("small");
+            evidenceLine.appendChild(evidenceLink);
+            info.appendChild(evidenceLine);
+        }
+
+        const removeButton = document.createElement("button");
+        removeButton.type = "button";
+        removeButton.className = "hll-completion-remove";
+        removeButton.textContent = "Remove";
+
+        removeButton.addEventListener("click", async () => {
+            const playerName = names[completion.user_id] || "this player";
+
+            if (!confirm(
+                `Remove ${playerName}'s completion of "${level.name}"?\n\n` +
+                "They lose the points for this level. They can submit evidence again later."
+            )) return;
+
+            removeButton.disabled = true;
+            removeButton.textContent = "Removing...";
+
+            const { error: removeError } = await supabaseClient.rpc(
+                "staff_remove_completion",
+                { p_completion_id: completion.id }
+            );
+
+            if (removeError) {
+                console.error("Remove completion failed:", removeError);
+                alert("Could not remove this completion:\n" + getErrorMessage(removeError));
+
+                removeButton.disabled = false;
+                removeButton.textContent = "Remove";
+                return;
+            }
+
+            row.remove();
+            remaining -= 1;
+            updateHeading();
+
+            if (remaining <= 0) showEmpty();
+        });
+
+        row.append(info, removeButton);
+        body.appendChild(row);
+    });
+}
+
 // Staff-only: right-click a level to move it up or down the list.
 function setupLevelContextMenu(list, levels) {
     async function moveLevel(level, direction) {
@@ -1232,6 +1510,7 @@ function setupLevelContextMenu(list, levels) {
             entries: [
                 { label: "Move up", onClick: () => moveLevel(level, "up") },
                 { label: "Move down", onClick: () => moveLevel(level, "down") },
+                { label: "Completions…", onClick: () => openLevelCompletionsModal(level) },
                 { label: "Remove level", danger: true, onClick: () => removeLevel(level) }
             ]
         })
