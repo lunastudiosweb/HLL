@@ -1234,6 +1234,16 @@ function bindStaffContextMenu(list, cardSelector, getItem, buildMenu) {
 
 /* ---------- Admin logs ---------- */
 
+// ["manage_players", "manage_levels"] -> "manage players and manage levels"
+function joinPermissionList(keys) {
+    const names = (Array.isArray(keys) ? keys : [])
+        .map(key => String(key).replace(/_/g, " "));
+
+    if (names.length <= 1) return names[0] || "nothing";
+
+    return names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
+}
+
 function describeLog(log) {
     const d = log.details || {};
     const target = log.target_name || "Unknown";
@@ -1281,18 +1291,27 @@ function describeLog(log) {
             return `restored ${target} to the leaderboard`;
 
         case "role_changed": {
-            const permissions = d.permissions
-                ? Object.entries(d.permissions)
-                    .filter(([, allowed]) => allowed === true)
-                    .map(([key]) => key.replace(/_/g, " "))
-                : [];
+            const from = d.old_role || "player";
+            const to = d.new_role || "player";
+            const level = { player: 0, moderator: 1, admin: 2 };
 
-            return `changed ${target}'s role from ${d.old_role || "player"} ` +
-                `to ${d.new_role || "player"}` +
-                (d.new_role === "moderator"
-                    ? ` (allowed: ${permissions.length ? permissions.join(", ") : "nothing"})`
-                    : "");
+            if (to === "player") {
+                return `removed ${target}'s ${roleLabel(from)} role`;
+            }
+
+            if (from === to) {
+                return `updated ${target}'s ${roleLabel(to)} settings`;
+            }
+
+            return `${level[to] > level[from] ? "promoted" : "demoted"} ` +
+                `${target} to ${roleLabel(to)}`;
         }
+
+        case "permissions_granted":
+            return `granted ${target} permission to ${joinPermissionList(d.permissions)}`;
+
+        case "permissions_revoked":
+            return `revoked ${target}'s permission to ${joinPermissionList(d.permissions)}`;
 
         default:
             return `${log.action}: ${target}`;
@@ -1300,7 +1319,7 @@ function describeLog(log) {
 }
 
 function logCategory(action) {
-    if (String(action).startsWith("role")) return "Roles";
+    if (/^(role|permission)/.test(String(action))) return "Roles";
     if (String(action).startsWith("level_submission")) return "Submissions";
     if (String(action).startsWith("level")) return "Levels";
     if (String(action).startsWith("completion")) return "Completions";
