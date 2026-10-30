@@ -192,6 +192,24 @@ function validHttpUrl(value) {
     }
 }
 
+// Supabase returns at most 1000 rows per request, so read big tables in pages.
+// buildQuery must return a fresh query that already has a stable .order(...).
+async function fetchAllRows(buildQuery, pageSize = 1000) {
+    const rows = [];
+
+    for (let from = 0; ; from += pageSize) {
+        const { data, error } = await buildQuery().range(from, from + pageSize - 1);
+
+        if (error) return { data: null, error };
+
+        rows.push(...(data || []));
+
+        if (!data || data.length < pageSize) break;
+    }
+
+    return { data: rows, error: null };
+}
+
 const UUID_PATTERN =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -3025,9 +3043,12 @@ async function renderPlayersList() {
             .select("id, rank, list_type, status, points")
             .eq("status", "approved"),
 
-        supabaseClient
-            .from("completions")
-            .select("user_id, level_id")
+        fetchAllRows(() =>
+            supabaseClient
+                .from("completions")
+                .select("user_id, level_id")
+                .order("id", { ascending: true })
+        )
     ]);
 
     let profilesData = profilesResult.data;
@@ -3444,6 +3465,670 @@ function setupCompletionSubmission() {
    12. PLAYER PROFILE
    ========================================================= */
 
+/* ---------- Player statistics ---------- */
+
+function ensureStatsStyles() {
+    if (document.getElementById("hll-stats-styles")) return;
+
+    const style = document.createElement("style");
+    style.id = "hll-stats-styles";
+    style.textContent = `
+        .hll-stats {
+            margin: 24px 0;
+        }
+
+        .hll-stats > h2 {
+            margin: 0 0 14px;
+            font-size: 22px;
+        }
+
+        .hll-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+        }
+
+        .hll-stats-tile,
+        .hll-stats-card {
+            padding: 14px 16px;
+            background: rgba(255, 255, 255, .05);
+            border: 1px solid rgba(255, 255, 255, .1);
+            border-radius: 12px;
+        }
+
+        .hll-stats-tile small,
+        .hll-stats-note {
+            display: block;
+            color: #9a9aa6;
+            font-size: 13px;
+        }
+
+        .hll-stats-tile strong {
+            display: block;
+            margin: 4px 0;
+            font-size: 26px;
+            line-height: 1.1;
+        }
+
+        .hll-stats-tile a {
+            color: #7fb4ff;
+            text-decoration: none;
+        }
+
+        .hll-stats-charts {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .hll-stats-card {
+            margin-top: 12px;
+        }
+
+        .hll-stats-charts .hll-stats-card {
+            margin-top: 0;
+        }
+
+        .hll-stats-card h3 {
+            margin: 0 0 4px;
+            font-size: 16px;
+        }
+
+        .hll-stats-card summary {
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .hll-stats-chart {
+            display: block;
+            width: 100%;
+            height: auto;
+            margin-top: 10px;
+        }
+
+        .hll-stats-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, .07);
+        }
+
+        .hll-stats-row:last-child {
+            border-bottom: 0;
+        }
+
+        .hll-stats-row a {
+            color: inherit;
+            font-weight: 600;
+            text-decoration: none;
+        }
+
+        .hll-stats-row small {
+            display: block;
+            color: #9a9aa6;
+        }
+
+        .hll-stats-gain {
+            color: #42d392;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+// Step chart for a series of { date: Date, value: number }.
+function buildStatsChart(series, { color, invertY = false, label }) {
+    const NS = "http://www.w3.org/2000/svg";
+    const W = 560;
+    const H = 200;
+    const left = 46;
+    const right = 14;
+    const top = 14;
+    const bottom = 30;
+
+    function make(name, attributes = {}) {
+        const element = document.createElementNS(NS, name);
+
+        Object.entries(attributes).forEach(([key, value]) => {
+            element.setAttribute(key, String(value));
+        });
+
+        return element;
+    }
+
+    const svg = make("svg", {
+        viewBox: `0 0 ${W} ${H}`,
+        class: "hll-stats-chart",
+        role: "img",
+        "aria-label": label
+    });
+
+    const times = series.map(item => item.date.getTime());
+    const minT = Math.min(...times);
+    const maxT = Math.max(...times);
+
+    let minV = Math.min(...series.map(item => item.value));
+    let maxV = Math.max(...series.map(item => item.value));
+
+    if (minV === maxV) {
+        maxV += 1;
+        minV = Math.max(invertY ? 1 : 0, minV - 1);
+    }
+
+    const x = time =>
+        maxT === minT
+            ? left + (W - left - right) / 2
+            : left + ((time - minT) / (maxT - minT)) * (W - left - right);
+
+    const y = value => {
+        const ratio = (value - minV) / (maxV - minV);
+
+        return invertY
+            ? top + ratio * (H - top - bottom)
+            : top + (1 - ratio) * (H - top - bottom);
+    };
+
+    // Horizontal grid lines with value labels
+    [0, 0.5, 1].forEach(ratio => {
+        const value = minV + ratio * (maxV - minV);
+        const position = y(value);
+
+        svg.appendChild(make("line", {
+            x1: left,
+            x2: W - right,
+            y1: position,
+            y2: position,
+            stroke: "rgba(255,255,255,.1)"
+        }));
+
+        const text = make("text", {
+            x: left - 6,
+            y: position + 4,
+            "text-anchor": "end",
+            "font-size": 11,
+            fill: "#9a9aa6"
+        });
+
+        text.textContent = String(Math.round(value));
+        svg.appendChild(text);
+    });
+
+    // Date labels
+    const firstLabel = make("text", {
+        x: left,
+        y: H - 8,
+        "font-size": 11,
+        fill: "#9a9aa6"
+    });
+
+    firstLabel.textContent = formatDate(series[0].date);
+    svg.appendChild(firstLabel);
+
+    if (maxT !== minT) {
+        const lastLabel = make("text", {
+            x: W - right,
+            y: H - 8,
+            "text-anchor": "end",
+            "font-size": 11,
+            fill: "#9a9aa6"
+        });
+
+        lastLabel.textContent = formatDate(series[series.length - 1].date);
+        svg.appendChild(lastLabel);
+    }
+
+    // Step line: a value holds until the next change
+    let path = "";
+
+    series.forEach((item, index) => {
+        const px = x(item.date.getTime());
+        const py = y(item.value);
+
+        path += index === 0
+            ? `M${px},${py}`
+            : ` L${px},${y(series[index - 1].value)} L${px},${py}`;
+    });
+
+    svg.appendChild(make("path", {
+        d: path,
+        fill: "none",
+        stroke: color,
+        "stroke-width": 2,
+        "stroke-linejoin": "round"
+    }));
+
+    // Dots with hover tooltips
+    series.forEach((item, index) => {
+        if (series.length > 80 && index !== series.length - 1) return;
+
+        const dot = make("circle", {
+            cx: x(item.date.getTime()),
+            cy: y(item.value),
+            r: 3.5,
+            fill: color
+        });
+
+        const title = document.createElementNS(NS, "title");
+        title.textContent = `${formatDate(item.date)} · ${item.value}`;
+
+        dot.appendChild(title);
+        svg.appendChild(dot);
+    });
+
+    return svg;
+}
+
+async function renderPlayerStatistics(profile, { actions, rank, points, completionList } = {}) {
+    ensureStatsStyles();
+
+    document.getElementById("hll-stats")?.remove();
+
+    const panel = document.createElement("section");
+    panel.id = "hll-stats";
+    panel.className = "hll-stats";
+
+    const title = document.createElement("h2");
+    title.textContent = `${profile.username || "Player"}'s Statistics`;
+
+    const body = document.createElement("div");
+    body.textContent = "Loading statistics...";
+
+    panel.append(title, body);
+
+    if (actions) {
+        actions.insertAdjacentElement("afterend", panel);
+    } else if (completionList) {
+        completionList.insertAdjacentElement("beforebegin", panel);
+    } else {
+        return;
+    }
+
+    try {
+        const [profilesResult, levelsResult, completionsResult] = await Promise.all([
+            fetchAllRows(() =>
+                supabaseClient
+                    .from("profiles")
+                    .select("id, username, points_adjustment, leaderboard_hidden")
+                    .order("id", { ascending: true })
+            ),
+            fetchAllRows(() =>
+                supabaseClient
+                    .from("levels")
+                    .select("id, name, rank, list_type, points")
+                    .eq("status", "approved")
+                    .order("id", { ascending: true })
+            ),
+            fetchAllRows(() =>
+                supabaseClient
+                    .from("completions")
+                    .select("user_id, level_id, verified_at")
+                    .order("id", { ascending: true })
+            )
+        ]);
+
+        let profilesData = profilesResult.data;
+        let levelsData = levelsResult.data;
+
+        // Older databases may not have the newer columns yet.
+        if (profilesResult.error) {
+            const retry = await fetchAllRows(() =>
+                supabaseClient
+                    .from("profiles")
+                    .select("id, username")
+                    .order("id", { ascending: true })
+            );
+
+            if (retry.error) throw retry.error;
+            profilesData = retry.data;
+        }
+
+        if (levelsResult.error) {
+            const retry = await fetchAllRows(() =>
+                supabaseClient
+                    .from("levels")
+                    .select("id, name, rank, list_type")
+                    .eq("status", "approved")
+                    .order("id", { ascending: true })
+            );
+
+            if (retry.error) throw retry.error;
+            levelsData = retry.data;
+        }
+
+        if (completionsResult.error) throw completionsResult.error;
+
+        const levelInfo = new Map();
+
+        for (const level of levelsData || []) {
+            levelInfo.set(level.id, {
+                ...level,
+                value: calculateLevelPoints(level.rank, level.list_type, level.points)
+            });
+        }
+
+        const people = new Map();
+
+        for (const person of profilesData || []) {
+            people.set(person.id, {
+                id: person.id,
+                username: person.username,
+                adjustment: Number(person.points_adjustment) || 0,
+                hidden: person.leaderboard_hidden === true,
+                points: 0,
+                completions: 0
+            });
+        }
+
+        const target = people.get(profile.id);
+
+        if (!target) throw new Error("Player not found.");
+
+        // Valid, de-duplicated completions in date order
+        const timeOf = completion =>
+            completion.verified_at ? new Date(completion.verified_at).getTime() : 0;
+
+        const ordered = [...(completionsResult.data || [])]
+            .sort((a, b) => timeOf(a) - timeOf(b));
+
+        const seen = new Set();
+        const events = [];
+
+        for (const completion of ordered) {
+            const person = people.get(completion.user_id);
+            const level = levelInfo.get(completion.level_id);
+
+            if (!person || !level || level.value <= 0) continue;
+
+            const key = `${completion.user_id}:${completion.level_id}`;
+
+            if (seen.has(key)) continue;
+
+            seen.add(key);
+
+            person.points += level.value;
+            person.completions += 1;
+
+            events.push({
+                userId: completion.user_id,
+                level,
+                date: completion.verified_at ? new Date(completion.verified_at) : null
+            });
+        }
+
+        // Current leaderboard position (same ordering as the Players page)
+        const leaderboard = [...people.values()]
+            .filter(person => !person.hidden)
+            .map(person => ({
+                ...person,
+                total: Math.max(0, person.points + person.adjustment)
+            }))
+            .sort((a, b) =>
+                b.total - a.total ||
+                b.completions - a.completions ||
+                String(a.username || "").localeCompare(String(b.username || ""))
+            );
+
+        const position = leaderboard.findIndex(person => person.id === profile.id) + 1;
+        const total = Math.max(0, target.points + target.adjustment);
+
+        const positionText = target.hidden ? "Hidden" : position ? `#${position}` : "—";
+
+        if (rank) rank.textContent = positionText;
+        if (points) points.textContent = total.toLocaleString();
+
+        // This player's own history
+        const mine = events.filter(event => event.userId === profile.id);
+        const mainCount = mine.filter(event => event.level.list_type === "main").length;
+        const extendedCount = mine.filter(event => event.level.list_type === "extended").length;
+
+        const best = mine.reduce((current, event) =>
+            !current || Number(event.level.rank) < Number(current.level.rank)
+                ? event
+                : current,
+            null
+        );
+
+        // Points over time
+        let running = 0;
+        const pointsSeries = [];
+
+        for (const event of mine) {
+            running += event.level.value;
+
+            if (event.date) {
+                pointsSeries.push({
+                    date: event.date,
+                    value: Math.max(0, running + target.adjustment)
+                });
+            }
+        }
+
+        // Leaderboard position over time, using today's point values
+        const runningTotals = new Map();
+        const rankSeries = [];
+
+        for (const event of events) {
+            runningTotals.set(
+                event.userId,
+                (runningTotals.get(event.userId) || 0) + event.level.value
+            );
+
+            if (event.userId !== profile.id || !event.date || target.hidden) continue;
+
+            const mineTotal = Math.max(
+                0,
+                runningTotals.get(profile.id) + target.adjustment
+            );
+
+            let ahead = 0;
+
+            for (const person of people.values()) {
+                if (person.id === profile.id || person.hidden) continue;
+
+                const personTotal = Math.max(
+                    0,
+                    (runningTotals.get(person.id) || 0) + person.adjustment
+                );
+
+                if (personTotal > mineTotal) ahead += 1;
+            }
+
+            rankSeries.push({ date: event.date, value: ahead + 1 });
+        }
+
+        if (rankSeries.length && position) {
+            rankSeries[rankSeries.length - 1].value = position;
+        }
+
+        // Last 30 days
+        const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+        const recentEvents = mine.filter(event => event.date && event.date.getTime() >= cutoff);
+        const recentPoints = recentEvents.reduce((sum, event) => sum + event.level.value, 0);
+
+        body.textContent = "";
+
+        // Summary tiles
+        const grid = document.createElement("div");
+        grid.className = "hll-stats-grid";
+
+        function addTile(label, value, sub) {
+            const tile = document.createElement("div");
+            tile.className = "hll-stats-tile";
+
+            const labelElement = document.createElement("small");
+            labelElement.textContent = label;
+
+            const valueElement = document.createElement("strong");
+            valueElement.textContent = String(value);
+
+            tile.append(labelElement, valueElement);
+
+            if (sub instanceof Node) {
+                const subElement = document.createElement("small");
+                subElement.appendChild(sub);
+                tile.appendChild(subElement);
+            } else if (sub) {
+                const subElement = document.createElement("small");
+                subElement.textContent = sub;
+                tile.appendChild(subElement);
+            }
+
+            grid.appendChild(tile);
+        }
+
+        addTile(
+            "Players Rank",
+            positionText,
+            target.hidden
+                ? "Removed from the leaderboard"
+                : leaderboard.length ? `of ${leaderboard.length} players` : ""
+        );
+
+        addTile("Total Points", total.toLocaleString(), "");
+        addTile("Main List Completions", mainCount, "");
+        addTile("Extended List Completions", extendedCount, "");
+        addTile("Total Completions", mine.length, "");
+
+        let bestSub = "No completions yet";
+
+        if (best) {
+            bestSub = document.createElement("a");
+            bestSub.href = `level.html?id=${encodeURIComponent(best.level.id)}`;
+            bestSub.textContent = best.level.name || "Unnamed level";
+        }
+
+        addTile("Highest Completion", best ? `#${best.level.rank}` : "—", bestSub);
+
+        body.appendChild(grid);
+
+        // Charts: how the statistics change over time
+        const charts = document.createElement("div");
+        charts.className = "hll-stats-charts";
+
+        function addChartCard(heading, note, series, options) {
+            const card = document.createElement("div");
+            card.className = "hll-stats-card";
+
+            const headingElement = document.createElement("h3");
+            headingElement.textContent = heading;
+
+            const noteElement = document.createElement("span");
+            noteElement.className = "hll-stats-note";
+            noteElement.textContent = note;
+
+            card.append(headingElement, noteElement);
+
+            if (series.length >= 2) {
+                card.appendChild(buildStatsChart(series, options));
+            } else {
+                const empty = document.createElement("p");
+                empty.className = "hll-stats-note";
+                empty.textContent = "Not enough history yet. This fills in as more levels are completed.";
+                card.appendChild(empty);
+            }
+
+            charts.appendChild(card);
+        }
+
+        addChartCard(
+            "Points over time",
+            recentEvents.length
+                ? `Last 30 days: +${recentPoints.toLocaleString()} points from ${recentEvents.length} completion${recentEvents.length === 1 ? "" : "s"}`
+                : "No completions in the last 30 days",
+            pointsSeries,
+            { color: "#42d392", label: `${profile.username || "Player"}'s points over time` }
+        );
+
+        addChartCard(
+            "Leaderboard position over time",
+            "Lower is better. Based on today's level point values.",
+            rankSeries,
+            {
+                color: "#7fb4ff",
+                invertY: true,
+                label: `${profile.username || "Player"}'s leaderboard position over time`
+            }
+        );
+
+        body.appendChild(charts);
+
+        // Completions with dates
+        function buildRow(event) {
+            const row = document.createElement("div");
+            row.className = "hll-stats-row";
+
+            const info = document.createElement("div");
+
+            const link = document.createElement("a");
+            link.href = `level.html?id=${encodeURIComponent(event.level.id)}`;
+            link.textContent = event.level.name || "Unnamed level";
+
+            const meta = document.createElement("small");
+            meta.textContent =
+                `#${event.level.rank} · ${event.level.list_type === "main" ? "Main List" : "Extended List"}` +
+                ` · ${event.date ? formatDate(event.date) : "Unknown date"}`;
+
+            info.append(link, meta);
+
+            const gain = document.createElement("span");
+            gain.className = "hll-stats-gain";
+            gain.textContent = `+${event.level.value.toLocaleString()}`;
+
+            row.append(info, gain);
+
+            return row;
+        }
+
+        const newestFirst = [...mine].reverse();
+
+        const recentCard = document.createElement("div");
+        recentCard.className = "hll-stats-card";
+
+        const recentHeading = document.createElement("h3");
+        recentHeading.textContent = "Recent completions";
+        recentCard.appendChild(recentHeading);
+
+        if (!newestFirst.length) {
+            const empty = document.createElement("p");
+            empty.className = "hll-stats-note";
+            empty.textContent = "No verified completions yet.";
+            recentCard.appendChild(empty);
+        } else {
+            newestFirst.slice(0, 5).forEach(event => {
+                recentCard.appendChild(buildRow(event));
+            });
+        }
+
+        body.appendChild(recentCard);
+
+        if (newestFirst.length > 5) {
+            const history = document.createElement("details");
+            history.className = "hll-stats-card";
+
+            const summary = document.createElement("summary");
+            summary.textContent = `Full completion history (${newestFirst.length})`;
+            history.appendChild(summary);
+
+            newestFirst.forEach(event => {
+                history.appendChild(buildRow(event));
+            });
+
+            body.appendChild(history);
+        }
+    } catch (error) {
+        console.error("Could not load player statistics:", error);
+
+        body.textContent = "Statistics could not be loaded right now.";
+
+        if (rank) rank.textContent = "—";
+        if (points) points.textContent = "—";
+    }
+}
+
 async function renderProfile() {
     const heading = $("profile-heading");
     const description = $("profile-description");
@@ -3538,8 +4223,12 @@ async function renderProfile() {
         }
     }
 
-    if (rank) rank.textContent = "—";
-    if (points) points.textContent = "Not configured";
+    await renderPlayerStatistics(profile, {
+        actions,
+        rank,
+        points,
+        completionList
+    });
 
     const { data: completions, error: completionError } =
         await supabaseClient
