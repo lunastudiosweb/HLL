@@ -210,6 +210,139 @@ async function fetchAllRows(buildQuery, pageSize = 1000) {
     return { data: rows, error: null };
 }
 
+/* ---------- Badges ---------- */
+
+// Cosmetic labels only. They never grant any permissions.
+const BADGE_DEFS = [
+    { key: "youtube", label: "YouTube", icon: "▶" },
+    { key: "verified", label: "Verified", icon: "✔" },
+    { key: "admin", label: "Admin", icon: "★" },
+    { key: "moderator", label: "Moderator", icon: "◆" }
+];
+
+function badgeLabel(key) {
+    return BADGE_DEFS.find(def => def.key === key)?.label || String(key || "badge");
+}
+
+// Keeps only known badges, in a fixed display order.
+function normalizeBadges(value) {
+    const list = Array.isArray(value) ? value : [];
+
+    return BADGE_DEFS
+        .filter(def => list.includes(def.key))
+        .map(def => def.key);
+}
+
+function ensureBadgeStyles() {
+    if (document.getElementById("hll-badge-styles")) return;
+
+    const style = document.createElement("style");
+    style.id = "hll-badge-styles";
+    style.textContent = `
+        .hll-name-line {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 4px 8px;
+        }
+
+        .hll-badges {
+            display: inline-flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            vertical-align: middle;
+        }
+
+        .hll-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            border: 1px solid currentColor;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: .03em;
+            line-height: 1.5;
+            white-space: nowrap;
+        }
+
+        .hll-badge-youtube {
+            color: #ff6b6b;
+            background: rgba(255, 70, 70, .14);
+        }
+
+        .hll-badge-verified {
+            color: #5aaeff;
+            background: rgba(90, 174, 255, .14);
+        }
+
+        .hll-badge-admin {
+            color: #f5c04a;
+            background: rgba(245, 192, 74, .14);
+        }
+
+        .hll-badge-moderator {
+            color: #42d392;
+            background: rgba(66, 211, 146, .14);
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+// HTML string for a list of badge keys (everything comes from the fixed list above).
+function badgeChipsHTML(badges) {
+    const keys = normalizeBadges(badges);
+
+    if (!keys.length) return "";
+
+    return `<span class="hll-badges">` + keys.map(key => {
+        const def = BADGE_DEFS.find(item => item.key === key);
+
+        return `<span class="hll-badge hll-badge-${def.key}" title="${def.label}">` +
+            `<span aria-hidden="true">${def.icon}</span>${def.label}</span>`;
+    }).join("") + `</span>`;
+}
+
+// profiles.badges is read separately, so the site keeps working
+// even before the badges column exists in the database.
+async function fetchBadgeMap(profileId = null) {
+    const map = new Map();
+
+    try {
+        const result = profileId
+            ? await supabaseClient
+                .from("profiles")
+                .select("id, badges")
+                .eq("id", profileId)
+            : await fetchAllRows(() =>
+                supabaseClient
+                    .from("profiles")
+                    .select("id, badges")
+                    .order("id", { ascending: true })
+            );
+
+        if (result.error) return map;
+
+        for (const row of result.data || []) {
+            map.set(row.id, normalizeBadges(row.badges));
+        }
+    } catch (error) {
+        console.warn("Badges unavailable:", error);
+    }
+
+    return map;
+}
+
+// Reload the page but keep the scroll position.
+function reloadPage() {
+    try {
+        sessionStorage.setItem("hllScrollY", String(window.scrollY));
+    } catch { /* storage unavailable */ }
+
+    location.reload();
+}
+
 const UUID_PATTERN =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -1324,6 +1457,12 @@ function describeLog(log) {
             return `${level[to] > level[from] ? "promoted" : "demoted"} ` +
                 `${target} to ${roleLabel(to)}`;
         }
+
+        case "badge_added":
+            return `gave ${target} the ${badgeLabel(d.badge)} badge`;
+
+        case "badge_removed":
+            return `removed the ${badgeLabel(d.badge)} badge from ${target}`;
 
         case "permissions_granted":
             return `granted ${target} permission to ${joinPermissionList(d.permissions)}`;
@@ -2787,10 +2926,78 @@ async function setupRemovedLevelsPanel(list, listType) {
 }
 
 // Staff-only right-click (or long-press) menu on the player leaderboard.
-function setupPlayerContextMenu(list, players) {
+function setupPlayerContextMenu(list, players, staffInfo) {
     if (!list || list.dataset.hllStaffMenuBound === "true") return;
 
     list.dataset.hllStaffMenuBound = "true";
+
+    if (!document.getElementById("hll-staff-submenu-styles")) {
+        const style = document.createElement("style");
+        style.id = "hll-staff-submenu-styles";
+        style.textContent = `
+            .hll-staff-menu .hll-staff-menu-sub-host {
+                position: relative;
+            }
+
+            .hll-staff-menu .hll-staff-menu-sub-trigger {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+
+            .hll-staff-menu .hll-staff-menu-sub-host:hover > .hll-staff-menu-sub-trigger,
+            .hll-staff-menu .hll-staff-menu-sub-host.open > .hll-staff-menu-sub-trigger {
+                background: rgba(255, 255, 255, .08);
+            }
+
+            .hll-staff-menu .hll-staff-submenu {
+                display: none;
+                position: absolute;
+                left: 100%;
+                top: -6px;
+                min-width: 190px;
+                padding: 6px;
+                background: #17171c;
+                border: 1px solid rgba(255, 255, 255, .14);
+                border-radius: 10px;
+                box-shadow: 0 12px 32px rgba(0, 0, 0, .55);
+            }
+
+            .hll-staff-menu .hll-staff-menu-sub-host.flip > .hll-staff-submenu {
+                left: auto;
+                right: 100%;
+            }
+
+            .hll-staff-menu .hll-staff-menu-sub-host.up > .hll-staff-submenu {
+                top: auto;
+                bottom: -6px;
+            }
+
+            .hll-staff-menu .hll-staff-menu-sub-host:hover > .hll-staff-submenu,
+            .hll-staff-menu .hll-staff-menu-sub-host.open > .hll-staff-submenu {
+                display: block;
+            }
+
+            .hll-staff-menu .hll-staff-submenu button {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+
+            .hll-staff-menu .hll-staff-submenu button:disabled {
+                opacity: .45;
+                cursor: not-allowed;
+            }
+
+            .hll-staff-menu .hll-check {
+                display: inline-block;
+                width: 14px;
+                color: #42d392;
+                font-weight: 700;
+            }
+        `;
+        document.head.appendChild(style);
+    }
 
     if (!document.getElementById("hll-staff-menu-styles")) {
         const style = document.createElement("style");
@@ -2858,7 +3065,7 @@ function setupPlayerContextMenu(list, players) {
             return;
         }
 
-        location.reload();
+        reloadPage();
     }
 
     function openMenu(x, y, player) {
@@ -2885,6 +3092,68 @@ function setupPlayerContextMenu(list, players) {
         addItem("View profile", () => {
             location.href = `profile.html?id=${encodeURIComponent(player.id)}`;
         });
+
+        // Badges: hover (or tap) to open the list, then click a badge to give or remove it.
+        const badgeHost = document.createElement("div");
+        badgeHost.className = "hll-staff-menu-sub-host";
+
+        const badgeTrigger = document.createElement("button");
+        badgeTrigger.type = "button";
+        badgeTrigger.className = "hll-staff-menu-sub-trigger";
+
+        const triggerText = document.createElement("span");
+        triggerText.textContent = "Badges";
+
+        const triggerArrow = document.createElement("span");
+        triggerArrow.setAttribute("aria-hidden", "true");
+        triggerArrow.textContent = "›";
+
+        badgeTrigger.append(triggerText, triggerArrow);
+
+        const submenu = document.createElement("div");
+        submenu.className = "hll-staff-submenu";
+        submenu.setAttribute("role", "menu");
+
+        const viewerIsAdmin = staffInfo?.role === "admin";
+
+        BADGE_DEFS.forEach(def => {
+            const has = (player.badges || []).includes(def.key);
+            const adminOnly = def.key === "admin" || def.key === "moderator";
+
+            const item = document.createElement("button");
+            item.type = "button";
+            item.disabled = adminOnly && !viewerIsAdmin;
+
+            if (item.disabled) {
+                item.title = "Only admins can give or remove this badge.";
+            }
+
+            const check = document.createElement("span");
+            check.className = "hll-check";
+            check.textContent = has ? "✓" : "";
+
+            const text = document.createElement("span");
+            text.textContent = def.label;
+
+            item.append(check, text);
+
+            item.addEventListener("click", () => {
+                runStaffAction("staff_set_player_badge", {
+                    p_user_id: player.id,
+                    p_badge: def.key,
+                    p_enabled: !has
+                });
+            });
+
+            submenu.appendChild(item);
+        });
+
+        badgeTrigger.addEventListener("click", () => {
+            badgeHost.classList.toggle("open");
+        });
+
+        badgeHost.append(badgeTrigger, submenu);
+        menu.appendChild(badgeHost);
 
         addItem("Edit points…", () => {
             closeMenu();
@@ -2952,6 +3221,16 @@ function setupPlayerContextMenu(list, players) {
 
         menu.style.top =
             Math.max(8, Math.min(y, window.innerHeight - rect.height - 8)) + "px";
+
+        // Open the badge list to the left / upwards when there is no room.
+        const host = menu.querySelector(".hll-staff-menu-sub-host");
+
+        if (host) {
+            const hostRect = host.getBoundingClientRect();
+
+            if (hostRect.right + 200 > window.innerWidth) host.classList.add("flip");
+            if (hostRect.top + 180 > window.innerHeight) host.classList.add("up");
+        }
     }
 
     function playerFromEvent(event) {
@@ -3149,11 +3428,16 @@ async function renderPlayersList() {
         }
     }
 
+    ensureBadgeStyles();
+
+    const badgeMap = await fetchBadgeMap();
+
     const playerTotals = new Map();
 
     for (const profile of profilesData || []) {
         playerTotals.set(profile.id, {
             ...profile,
+            badges: badgeMap.get(profile.id) || [],
             adjustment: Number(profile.points_adjustment) || 0,
             hidden: profile.leaderboard_hidden === true,
             points: 0,
@@ -3226,7 +3510,10 @@ async function renderPlayersList() {
                     </span>
 
                     <span class="ranking-details">
-                        <strong>${escapeHTML(player.username || "Player")}</strong>
+                        <span class="hll-name-line">
+                            <strong>${escapeHTML(player.username || "Player")}</strong>
+                            ${badgeChipsHTML(player.badges)}
+                        </span>
                         <span>
                             ${player.completions}
                             verified level${player.completions === 1 ? "" : "s"}${player.hidden ? " · HIDDEN FROM LEADERBOARD" : ""}
@@ -3246,9 +3533,20 @@ async function renderPlayersList() {
 
     render(players);
 
-    if (isStaff && staffCan(await getStaffInfo(), "manage_players")) {
-        setupPlayerContextMenu(list, players);
+    const playersStaffInfo = isStaff ? await getStaffInfo() : null;
+
+    if (playersStaffInfo && staffCan(playersStaffInfo, "manage_players")) {
+        setupPlayerContextMenu(list, players, playersStaffInfo);
     }
+
+    try {
+        const savedScroll = sessionStorage.getItem("hllScrollY");
+
+        if (savedScroll !== null) {
+            sessionStorage.removeItem("hllScrollY");
+            window.scrollTo(0, Number(savedScroll) || 0);
+        }
+    } catch { /* storage unavailable */ }
 
     if (search && search.dataset.hllPlayersSearchBound !== "true") {
         search.dataset.hllPlayersSearchBound = "true";
@@ -4180,6 +4478,19 @@ async function renderProfile() {
     }
 
     heading.textContent = profile.username || "Player";
+
+    ensureBadgeStyles();
+
+    const profileBadges = (await fetchBadgeMap(profile.id)).get(profile.id) || [];
+
+    if (profileBadges.length) {
+        heading.append(" ");
+
+        const holder = document.createElement("span");
+        holder.innerHTML = badgeChipsHTML(profileBadges);
+
+        heading.append(...holder.childNodes);
+    }
 
     if (description) {
         description.textContent = profile.show_bio === false
