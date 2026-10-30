@@ -1791,48 +1791,116 @@ async function openLogsPanel() {
     await loadMore();
 }
 
-// Adds a "Logs" tab to the site navigation for admins only.
-async function setupLogsTab() {
-    if (!currentUser || document.getElementById("hll-logs-tab")) return;
+/* ---------- Staff menu: one nav tab with a hover dropdown ---------- */
 
-    const { data } = await supabaseClient
-        .from("staff_members")
-        .select("role")
-        .eq("user_id", currentUser.id)
-        .maybeSingle();
+function ensureStaffTabStyles() {
+    if (document.getElementById("hll-staff-tab-styles")) return;
 
-    if (!data || data.role !== "admin") return;
+    const style = document.createElement("style");
+    style.id = "hll-staff-tab-styles";
+    style.textContent = `
+        .hll-staff-caret {
+            display: inline-block;
+            margin-left: 4px;
+            font-size: .8em;
+            opacity: .75;
+            transition: transform .15s ease;
+        }
 
-    let tab = null;
+        #hll-staff-tab[aria-expanded="true"] .hll-staff-caret {
+            transform: rotate(180deg);
+        }
 
-    // Copy an existing nav link so the tab matches the site's styling.
-    const reference = document.querySelector(
-        'a[href="players.html"], a[href="main-list.html"], nav a'
-    );
+        .hll-staff-dropdown {
+            position: fixed;
+            z-index: 9500;
+            min-width: 200px;
+            padding: 6px;
+            background: #17171c;
+            border: 1px solid rgba(255, 255, 255, .14);
+            border-radius: 10px;
+            box-shadow: 0 12px 32px rgba(0, 0, 0, .55);
+            font-size: 14px;
+        }
 
-    if (reference) {
-        const host = reference.closest("li") || reference;
-        const clone = host.cloneNode(true);
+        .hll-staff-dropdown[hidden] {
+            display: none;
+        }
 
-        tab = clone.matches("a") ? clone : clone.querySelector("a");
+        .hll-staff-dropdown a {
+            display: block;
+            padding: 9px 12px;
+            border-radius: 6px;
+            color: #f2f2f5;
+            text-decoration: none;
+            white-space: nowrap;
+        }
 
-        if (tab) {
-            tab.id = "hll-logs-tab";
-            tab.href = "#logs";
-            tab.textContent = "Logs";
-            tab.classList.remove("active", "current");
-            tab.removeAttribute("aria-current");
+        .hll-staff-dropdown a:hover,
+        .hll-staff-dropdown a:focus-visible {
+            background: rgba(255, 255, 255, .08);
+            outline: none;
+        }
 
-            host.insertAdjacentElement("afterend", clone);
+        .hll-staff-dropdown small {
+            display: block;
+            color: #9a9aa6;
+            font-size: 12px;
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+// Adds one "Staff" tab to the nav for staff. Hovering it (or tapping it on a
+// phone) opens a dropdown: Dashboard for all staff, Logs and Roles for admins.
+async function setupStaffMenu() {
+    if (!currentUser || document.getElementById("hll-staff-tab")) return;
+
+    const info = await getStaffInfo();
+
+    if (!info) return;
+
+    const isAdmin = info.role === "admin";
+
+    ensureStaffTabStyles();
+
+    const entries = [
+        { label: "Staff Dashboard", sub: "Review submissions", href: "staff.html" }
+    ];
+
+    if (isAdmin) {
+        entries.push(
+            { label: "Logs", sub: "Every staff change", hash: "logs", onClick: openLogsPanel },
+            { label: "Roles", sub: "Admins, moderators and permissions", hash: "roles", onClick: openRolesPanel }
+        );
+    }
+
+    // 1) Reuse an existing Staff link in the nav, 2) otherwise copy a nav link,
+    // 3) otherwise fall back to a small floating button.
+    let tab = document.querySelector('nav a[href="staff.html"], header a[href="staff.html"]');
+
+    if (!tab) {
+        const links = [...document.querySelectorAll("nav a, header nav a")]
+            .filter(link => !link.classList.contains("login-button"));
+
+        const reference = links[links.length - 1];
+
+        if (reference) {
+            const host = reference.closest("li") || reference;
+            const clone = host.cloneNode(true);
+
+            tab = clone.matches("a") ? clone : clone.querySelector("a");
+
+            if (tab) {
+                tab.classList.remove("active", "current");
+                tab.removeAttribute("aria-current");
+                host.insertAdjacentElement("afterend", clone);
+            }
         }
     }
 
-    // Fallback if the page has no nav to copy.
     if (!tab) {
         tab = document.createElement("a");
-        tab.id = "hll-logs-tab";
-        tab.href = "#logs";
-        tab.textContent = "Logs";
 
         Object.assign(tab.style, {
             position: "fixed",
@@ -1850,12 +1918,140 @@ async function setupLogsTab() {
         document.body.appendChild(tab);
     }
 
-    tab.addEventListener("click", event => {
-        event.preventDefault();
-        openLogsPanel();
+    tab.id = "hll-staff-tab";
+    tab.href = "#staff";
+    tab.textContent = "Staff";
+    tab.classList.remove("active", "current");
+    tab.removeAttribute("aria-current");
+    tab.setAttribute("aria-haspopup", "menu");
+    tab.setAttribute("aria-expanded", "false");
+
+    const caret = document.createElement("span");
+    caret.className = "hll-staff-caret";
+    caret.setAttribute("aria-hidden", "true");
+    caret.textContent = "▾";
+    tab.appendChild(caret);
+
+    const dropdown = document.createElement("div");
+    dropdown.id = "hll-staff-dropdown";
+    dropdown.className = "hll-staff-dropdown";
+    dropdown.setAttribute("role", "menu");
+    dropdown.hidden = true;
+
+    let closeTimer = null;
+    let openedAt = 0;
+
+    function close() {
+        clearTimeout(closeTimer);
+        dropdown.hidden = true;
+        tab.setAttribute("aria-expanded", "false");
+    }
+
+    function closeSoon() {
+        clearTimeout(closeTimer);
+        closeTimer = setTimeout(close, 180);
+    }
+
+    function open() {
+        clearTimeout(closeTimer);
+
+        dropdown.hidden = false;
+
+        const rect = tab.getBoundingClientRect();
+        const width = dropdown.offsetWidth;
+        const height = dropdown.offsetHeight;
+
+        const left = Math.min(
+            Math.max(8, rect.left),
+            Math.max(8, window.innerWidth - width - 8)
+        );
+
+        // Open upwards when there is no room below (for example the floating button).
+        const fitsBelow = rect.bottom + 6 + height <= window.innerHeight;
+        const top = fitsBelow || rect.top - height - 6 < 8
+            ? rect.bottom + 6
+            : rect.top - height - 6;
+
+        dropdown.style.left = `${left}px`;
+        dropdown.style.top = `${top}px`;
+
+        tab.setAttribute("aria-expanded", "true");
+        openedAt = Date.now();
+    }
+
+    entries.forEach(entry => {
+        const item = document.createElement("a");
+        item.href = entry.href || `#${entry.hash}`;
+        item.setAttribute("role", "menuitem");
+
+        const label = document.createElement("span");
+        label.textContent = entry.label;
+
+        const sub = document.createElement("small");
+        sub.textContent = entry.sub;
+
+        item.append(label, sub);
+
+        if (entry.onClick) {
+            item.addEventListener("click", event => {
+                event.preventDefault();
+                close();
+                entry.onClick();
+            });
+        }
+
+        dropdown.appendChild(item);
     });
 
-    if (location.hash === "#logs") openLogsPanel();
+    document.body.appendChild(dropdown);
+
+    tab.addEventListener("mouseenter", open);
+    tab.addEventListener("mouseleave", closeSoon);
+    dropdown.addEventListener("mouseenter", () => clearTimeout(closeTimer));
+    dropdown.addEventListener("mouseleave", closeSoon);
+
+    // Tap/click: open it, or close it if it has been open for a moment already.
+    // (A hover that has just opened the menu is not undone by the click that follows.)
+    tab.addEventListener("click", event => {
+        event.preventDefault();
+
+        if (dropdown.hidden) {
+            open();
+        } else if (Date.now() - openedAt > 400) {
+            close();
+        }
+    });
+
+    tab.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " " || event.key === "ArrowDown") {
+            event.preventDefault();
+            open();
+            dropdown.querySelector("a")?.focus();
+        }
+    });
+
+    dropdown.addEventListener("keydown", event => {
+        if (event.key === "Escape") {
+            close();
+            tab.focus();
+        }
+    });
+
+    document.addEventListener("click", event => {
+        if (!dropdown.hidden && !dropdown.contains(event.target) && !tab.contains(event.target)) {
+            close();
+        }
+    });
+
+    document.addEventListener("keydown", event => {
+        if (event.key === "Escape") close();
+    });
+
+    window.addEventListener("scroll", close, { passive: true });
+    window.addEventListener("resize", close);
+
+    if (isAdmin && location.hash === "#logs") openLogsPanel();
+    if (isAdmin && location.hash === "#roles") openRolesPanel();
 }
 
 /* ---------- Roles (admin only) ---------- */
@@ -2369,68 +2565,6 @@ async function openRolesPanel() {
     renderList();
 }
 
-// Adds a "Roles" tab to the site navigation for admins only.
-async function setupRolesTab() {
-    if (!currentUser || document.getElementById("hll-roles-tab")) return;
-
-    const info = await getStaffInfo();
-
-    if (!info || info.role !== "admin") return;
-
-    let tab = null;
-
-    // Copy a nav link (the Logs tab if present) so the tab matches the site's styling.
-    const reference =
-        document.getElementById("hll-logs-tab") ||
-        document.querySelector('a[href="players.html"], a[href="main-list.html"], nav a');
-
-    if (reference) {
-        const host = reference.closest("li") || reference;
-        const clone = host.cloneNode(true);
-
-        tab = clone.matches("a") ? clone : clone.querySelector("a");
-
-        if (tab) {
-            tab.id = "hll-roles-tab";
-            tab.href = "#roles";
-            tab.textContent = "Roles";
-            tab.classList.remove("active", "current");
-            tab.removeAttribute("aria-current");
-
-            host.insertAdjacentElement("afterend", clone);
-        }
-    }
-
-    // Fallback if the page has no nav to copy.
-    if (!tab) {
-        tab = document.createElement("a");
-        tab.id = "hll-roles-tab";
-        tab.href = "#roles";
-        tab.textContent = "Roles";
-
-        Object.assign(tab.style, {
-            position: "fixed",
-            right: "16px",
-            bottom: "64px",
-            zIndex: "9000",
-            padding: "10px 16px",
-            background: "#17171c",
-            border: "1px solid rgba(255,255,255,.2)",
-            borderRadius: "999px",
-            color: "#f2f2f5",
-            textDecoration: "none"
-        });
-
-        document.body.appendChild(tab);
-    }
-
-    tab.addEventListener("click", event => {
-        event.preventDefault();
-        openRolesPanel();
-    });
-
-    if (location.hash === "#roles") openRolesPanel();
-}
 
 // Staff-only popup listing a level's verified completions with a Remove button.
 async function openLevelCompletionsModal(level) {
@@ -5512,15 +5646,10 @@ async function startHLL() {
         updateLoginButton();
         updateProfileSubmitButton();
 
-        // Non-blocking: only admins get the Logs and Roles tabs.
-        setupLogsTab()
-            .catch(error => {
-                console.warn("Logs tab unavailable:", error);
-            })
-            .then(() => setupRolesTab())
-            .catch(error => {
-                console.warn("Roles tab unavailable:", error);
-            });
+        // Non-blocking: staff get one "Staff" tab with a hover dropdown.
+        setupStaffMenu().catch(error => {
+            console.warn("Staff menu unavailable:", error);
+        });
 
         const page = pageName();
 
