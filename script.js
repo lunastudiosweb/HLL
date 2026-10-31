@@ -3980,6 +3980,322 @@ function setupPlayerContextMenu(list, players, staffInfo) {
     window.addEventListener("resize", closeMenu);
 }
 
+/* =========================================================
+   LEADERBOARD ANALYTICS
+   ========================================================= */
+
+const ANALYTICS_COLORS = [
+    "#e44752", "#4f8cff", "#42d392", "#f0b73e", "#b08cff",
+    "#2fc4d8", "#ff8a4c", "#e66fc1", "#9bd34a", "#8c94a8"
+];
+
+function buildMultiLineChart(seriesList, { label }) {
+    const NS = "http://www.w3.org/2000/svg";
+    const W = 640;
+    const H = 260;
+    const left = 46;
+    const right = 14;
+    const top = 14;
+    const bottom = 30;
+
+    const make = (name, attributes = {}) => {
+        const element = document.createElementNS(NS, name);
+        Object.entries(attributes).forEach(([k, v]) => element.setAttribute(k, String(v)));
+        return element;
+    };
+
+    const svg = make("svg", {
+        viewBox: `0 0 ${W} ${H}`,
+        class: "hll-stats-chart",
+        role: "img",
+        "aria-label": label
+    });
+
+    const all = seriesList.flatMap(item => item.points);
+
+    if (!all.length) return svg;
+
+    const minT = Math.min(...all.map(p => p.date.getTime()));
+    const maxT = Math.max(...all.map(p => p.date.getTime()), minT + 1);
+    const maxV = Math.max(...all.map(p => p.value), 1);
+
+    const x = t => left + ((t - minT) / (maxT - minT)) * (W - left - right);
+    const y = v => top + (1 - v / maxV) * (H - top - bottom);
+
+    [0, 0.5, 1].forEach(ratio => {
+        const position = y(ratio * maxV);
+
+        svg.appendChild(make("line", {
+            x1: left, x2: W - right, y1: position, y2: position,
+            stroke: "rgba(255,255,255,.1)"
+        }));
+
+        const text = make("text", {
+            x: left - 6, y: position + 4, "text-anchor": "end",
+            "font-size": 11, fill: "#9a9aa6"
+        });
+        text.textContent = Math.round(ratio * maxV).toLocaleString();
+        svg.appendChild(text);
+    });
+
+    [[left, "start", minT], [W - right, "end", maxT]].forEach(([px, anchor, t]) => {
+        const text = make("text", {
+            x: px, y: H - 8, "text-anchor": anchor,
+            "font-size": 11, fill: "#9a9aa6"
+        });
+        text.textContent = formatDate(new Date(t));
+        svg.appendChild(text);
+    });
+
+    seriesList.forEach(item => {
+        if (!item.points.length) return;
+
+        let path = "";
+
+        item.points.forEach((p, i) => {
+            const px = x(p.date.getTime());
+            path += i === 0
+                ? `M${px},${y(p.value)}`
+                : ` L${px},${y(item.points[i - 1].value)} L${px},${y(p.value)}`;
+        });
+
+        const last = item.points[item.points.length - 1];
+        path += ` L${x(maxT)},${y(last.value)}`;
+
+        const line = make("path", {
+            d: path, fill: "none", stroke: item.color,
+            "stroke-width": 2, "stroke-linejoin": "round"
+        });
+        const title = document.createElementNS(NS, "title");
+        title.textContent = `${item.name} · ${last.value.toLocaleString()} points`;
+        line.appendChild(title);
+        svg.appendChild(line);
+    });
+
+    return svg;
+}
+
+function renderLeaderboardAnalytics(anchor, { players, levelPoints, completions }) {
+    ensureStatsStyles();
+
+    document.getElementById("hll-analytics")?.remove();
+
+    const byId = new Map(players.map(player => [player.id, player]));
+    const timeOf = c => (c.verified_at ? new Date(c.verified_at).getTime() : 0);
+
+    // Valid, de-duplicated completions in date order
+    const seen = new Set();
+    const events = [];
+
+    [...completions].sort((a, b) => timeOf(a) - timeOf(b)).forEach(c => {
+        const value = levelPoints.get(c.level_id);
+        const key = `${c.user_id}:${c.level_id}`;
+
+        if (!byId.has(c.user_id) || !value || seen.has(key)) return;
+
+        seen.add(key);
+        events.push({ userId: c.user_id, value, time: timeOf(c) });
+    });
+
+    if (!events.some(event => event.time)) return;
+
+    const panel = document.createElement("section");
+    panel.id = "hll-analytics";
+    panel.className = "hll-stats";
+
+    const heading = document.createElement("h2");
+    heading.textContent = "Leaderboard Analytics";
+    panel.appendChild(heading);
+
+    // ---- Points race ----
+    const raceCard = document.createElement("div");
+    raceCard.className = "hll-stats-card";
+
+    const raceHead = document.createElement("div");
+    raceHead.className = "hll-stats-row";
+    raceHead.innerHTML = "<h3>Points race</h3>";
+
+    const toggle = document.createElement("div");
+    toggle.className = "hll-analytics-toggle";
+
+    const chartHolder = document.createElement("div");
+    const legend = document.createElement("div");
+    legend.className = "hll-analytics-legend";
+
+    function drawRace(topN) {
+        const leaders = players.slice(0, topN);
+        const totals = new Map();
+        const points = new Map(leaders.map(player => [player.id, []]));
+
+        events.forEach(event => {
+            const next = (totals.get(event.userId) || 0) + event.value;
+            totals.set(event.userId, next);
+
+            if (points.has(event.userId) && event.time) {
+                points.get(event.userId).push({
+                    date: new Date(event.time),
+                    value: next + (byId.get(event.userId).adjustment || 0)
+                });
+            }
+        });
+
+        points.forEach(list => {
+            if (list.length) {
+                list.push({ date: new Date(), value: list[list.length - 1].value });
+            }
+        });
+
+        const seriesList = leaders.map((player, index) => ({
+            name: player.username || "Player",
+            color: ANALYTICS_COLORS[index % ANALYTICS_COLORS.length],
+            points: points.get(player.id)
+        }));
+
+        chartHolder.replaceChildren(
+            buildMultiLineChart(seriesList, { label: `Top ${topN} points over time` })
+        );
+
+        legend.innerHTML = seriesList.map(item => `
+            <span><i style="background:${item.color}"></i>${escapeHTML(item.name)}</span>
+        `).join("");
+    }
+
+    [5, 10].forEach(n => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = `Top ${n}`;
+        button.addEventListener("click", () => {
+            toggle.querySelectorAll("button").forEach(b => b.classList.remove("is-active"));
+            button.classList.add("is-active");
+            drawRace(n);
+        });
+        if (n === 5) button.classList.add("is-active");
+        toggle.appendChild(button);
+    });
+
+    raceHead.appendChild(toggle);
+    raceCard.append(raceHead, chartHolder, legend);
+
+    const note = document.createElement("small");
+    note.className = "hll-stats-note";
+    note.textContent = "Uses each level's current point value, so older totals reflect today's list.";
+    raceCard.appendChild(note);
+
+    panel.appendChild(raceCard);
+    drawRace(5);
+
+    // ---- Biggest climbers (last 30 days) ----
+    const DAYS = 30;
+    const cutoff = Date.now() - DAYS * 86400000;
+
+    function standings(untilTime) {
+        const totals = new Map();
+
+        events.forEach(event => {
+            if (event.time <= untilTime) {
+                totals.set(event.userId, (totals.get(event.userId) || 0) + event.value);
+            }
+        });
+
+        return [...totals.entries()]
+            .map(([id, base]) => ({
+                id,
+                total: Math.max(0, base + (byId.get(id).adjustment || 0)),
+                name: String(byId.get(id).username || "")
+            }))
+            .filter(row => !byId.get(row.id).hidden)
+            .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+    }
+
+    const before = new Map(standings(cutoff).map((row, i) => [row.id, i + 1]));
+    const now = standings(Date.now());
+
+    const movers = now
+        .map((row, i) => ({
+            ...row,
+            position: i + 1,
+            was: before.get(row.id) || null
+        }))
+        .map(row => ({
+            ...row,
+            change: row.was ? row.was - row.position : null
+        }))
+        .filter(row => row.change === null || row.change > 0)
+        .sort((a, b) =>
+            (b.change === null ? 0 : b.change) - (a.change === null ? 0 : a.change) ||
+            a.position - b.position
+        )
+        .slice(0, 5);
+
+    const moversCard = document.createElement("div");
+    moversCard.className = "hll-stats-card";
+    moversCard.innerHTML = `<h3>Biggest climbers · last ${DAYS} days</h3>`;
+
+    if (!movers.length) {
+        const empty = document.createElement("small");
+        empty.className = "hll-stats-note";
+        empty.textContent = "No movement on the leaderboard in this period.";
+        moversCard.appendChild(empty);
+    } else {
+        movers.forEach(row => {
+            const item = document.createElement("div");
+            item.className = "hll-stats-row";
+            item.innerHTML = `
+                <span>
+                    <a href="profile.html?id=${encodeURIComponent(row.id)}">${escapeHTML(row.name || "Player")}</a>
+                    <small>${row.was ? `#${row.was} → #${row.position}` : `New on the board at #${row.position}`}</small>
+                </span>
+                <span class="hll-stats-gain">${row.change === null ? "NEW" : `▲ ${row.change}`}</span>
+            `;
+            moversCard.appendChild(item);
+        });
+    }
+
+    panel.appendChild(moversCard);
+    anchor.insertAdjacentElement("afterend", panel);
+}
+
+async function renderLevelRankHistory(level, anchor) {
+    const { data, error } = await supabaseClient
+        .from("level_rank_history")
+        .select("rank, list_type, recorded_at")
+        .eq("level_id", level.id)
+        .order("recorded_at", { ascending: true });
+
+    // Table not created yet, or nothing recorded: silently skip.
+    if (error || !data || !data.length) return;
+
+    ensureStatsStyles();
+
+    document.getElementById("hll-rank-history")?.remove();
+
+    const series = data
+        .filter(row => row.rank !== null)
+        .map(row => ({ date: new Date(row.recorded_at), value: Number(row.rank) }));
+
+    // A single point is not a history yet.
+    if (series.length < 2) return;
+
+    series.push({ date: new Date(), value: series[series.length - 1].value });
+
+    const card = document.createElement("section");
+    card.id = "hll-rank-history";
+    card.className = "hll-stats-card";
+    card.innerHTML = "<h3>Rank history</h3>";
+    card.appendChild(buildStatsChart(series, {
+        color: "#e44752",
+        invertY: true,
+        label: `${level.name} rank over time`
+    }));
+
+    const note = document.createElement("small");
+    note.className = "hll-stats-note";
+    note.textContent = "Lower is harder. Changes are tracked from when rank history was enabled.";
+    card.appendChild(note);
+
+    anchor.insertAdjacentElement("beforebegin", card);
+}
+
 async function renderPlayersList() {
     const list = $("player-list");
     const count = $("player-count");
@@ -4011,7 +4327,7 @@ async function renderPlayersList() {
         fetchAllRows(() =>
             supabaseClient
                 .from("completions")
-                .select("user_id, level_id")
+                .select("user_id, level_id, verified_at")
                 .order("id", { ascending: true })
         )
     ]);
@@ -4218,6 +4534,16 @@ async function renderPlayersList() {
     }
 
     render(players);
+
+    try {
+        renderLeaderboardAnalytics(list, {
+            players: players.filter(player => !player.hidden),
+            levelPoints,
+            completions: completionsResult.data || []
+        });
+    } catch (analyticsError) {
+        console.warn("Leaderboard analytics unavailable:", analyticsError);
+    }
 
     const playersStaffInfo = isStaff ? await getStaffInfo() : null;
 
@@ -4553,6 +4879,45 @@ function ensureStatsStyles() {
         .hll-stats-row small {
             display: block;
             color: #9a9aa6;
+        }
+
+        .hll-analytics-toggle {
+            display: flex;
+            gap: 6px;
+        }
+
+        .hll-analytics-toggle button {
+            padding: 5px 11px;
+            border: 1px solid rgba(255, 255, 255, .14);
+            border-radius: 999px;
+            background: transparent;
+            color: #b4b7c1;
+            cursor: pointer;
+            font: inherit;
+            font-size: 12px;
+        }
+
+        .hll-analytics-toggle button.is-active {
+            border-color: rgba(228, 71, 82, .5);
+            background: rgba(228, 71, 82, .14);
+            color: #fff;
+        }
+
+        .hll-analytics-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px 14px;
+            margin: 8px 0 4px;
+            color: #c4c7d0;
+            font-size: 12px;
+        }
+
+        .hll-analytics-legend i {
+            display: inline-block;
+            width: 9px;
+            height: 9px;
+            margin-right: 6px;
+            border-radius: 50%;
         }
 
         .hll-stats-gain {
@@ -5403,6 +5768,12 @@ async function renderLevelDetail() {
     }
 
     const list = $("level-completions");
+
+    if (list) {
+        renderLevelRankHistory(level, list).catch(historyError => {
+            console.warn("Rank history unavailable:", historyError);
+        });
+    }
 
     const { data: completions, error: completionError } =
         await supabaseClient
