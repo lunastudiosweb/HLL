@@ -334,6 +334,13 @@ async function fetchBadgeMap(profileId = null) {
     return map;
 }
 
+// Removes "#something" from the address bar. Never throws.
+function clearUrlHash() {
+    try {
+        history.replaceState(null, "", location.pathname + location.search);
+    } catch { /* not allowed in this context; harmless */ }
+}
+
 // Reload the page but keep the scroll position.
 function reloadPage() {
     try {
@@ -1123,6 +1130,10 @@ async function renderLevelList(listType) {
     const staffInfo = await getStaffInfo();
 
     if (staffInfo) {
+        if (staffInfo.is_owner) {
+            setupOwnerAddLevel(list, listType, levels);
+        }
+
         setupLevelContextMenu(list, levels, staffInfo);
 
         if (staffCan(staffInfo, "manage_levels")) {
@@ -1234,28 +1245,28 @@ function getStaffInfo() {
         staffInfoCache = {
             userId,
             promise: (async () => {
-                let { data, error } = await supabaseClient
-                    .from("staff_members")
-                    .select("role, permissions")
-                    .eq("user_id", userId)
-                    .maybeSingle();
+                let data = null;
 
-                if (error) {
-                    // The permissions column is not installed yet.
-                    const retry = await supabaseClient
+                // Newer columns may not be installed yet, so fall back step by step.
+                for (const columns of ["role, permissions, is_owner", "role, permissions", "role"]) {
+                    const result = await supabaseClient
                         .from("staff_members")
-                        .select("role")
+                        .select(columns)
                         .eq("user_id", userId)
                         .maybeSingle();
 
-                    data = retry.data ? { ...retry.data, permissions: null } : null;
+                    if (!result.error) {
+                        data = result.data;
+                        break;
+                    }
                 }
 
                 if (!data || !["admin", "moderator"].includes(data.role)) {
                     return null;
                 }
 
-                return data;
+                // Owners are stored as admins with the owner flag set.
+                return { permissions: null, is_owner: false, ...data };
             })()
         };
     }
@@ -1263,7 +1274,14 @@ function getStaffInfo() {
     return staffInfoCache.promise;
 }
 
-// Admins can do everything. Moderators need the specific permission ticked.
+// "owner", "admin", "moderator" or null. Owners are admins with is_owner set.
+function effectiveRole(subject) {
+    if (!subject) return null;
+    if (subject.is_owner === true && subject.role === "admin") return "owner";
+    return subject.role || null;
+}
+
+// Admins (and owners) can do everything. Moderators need the permission ticked.
 function staffCan(info, permission) {
     if (!info) return false;
     if (info.role === "admin") return true;
@@ -1444,7 +1462,7 @@ function describeLog(log) {
         case "role_changed": {
             const from = d.old_role || "player";
             const to = d.new_role || "player";
-            const level = { player: 0, moderator: 1, admin: 2 };
+            const level = { player: 0, moderator: 1, admin: 2, owner: 3 };
 
             if (to === "player") {
                 return `removed ${target}'s ${roleLabel(from)} role`;
@@ -1868,6 +1886,16 @@ async function setupStaffMenu() {
         { label: "Staff Dashboard", sub: "Review submissions", href: "staff.html" }
     ];
 
+    if (info.is_owner) {
+        entries.push({
+            label: "Add Level",
+            sub: "Add to the Main or Extended List",
+            href: pageName() === "extended-list.html"
+                ? "extended-list.html#add-level"
+                : "main-list.html#add-level"
+        });
+    }
+
     if (isAdmin) {
         entries.push(
             { label: "Logs", sub: "Every staff change", hash: "logs", onClick: openLogsPanel },
@@ -2080,6 +2108,7 @@ const STAFF_PERMISSIONS = [
 ];
 
 function roleLabel(role) {
+    if (role === "owner") return "Owner";
     if (role === "admin") return "Admin";
     if (role === "moderator") return "Moderator";
     return "Player";
@@ -2192,6 +2221,11 @@ async function openRolesPanel() {
             .hll-roles-badge-admin {
                 background: rgba(255, 107, 107, .16);
                 color: #ff8f8f;
+            }
+
+            .hll-roles-badge-owner {
+                background: rgba(245, 192, 74, .18);
+                color: #f5c04a;
             }
 
             .hll-roles-badge-moderator {
@@ -2316,10 +2350,10 @@ async function openRolesPanel() {
     });
 
     function sortUsers() {
-        const order = { admin: 0, moderator: 1 };
+        const order = { owner: 0, admin: 1, moderator: 2 };
 
         users.sort((a, b) =>
-            (order[a.role] ?? 2) - (order[b.role] ?? 2) ||
+            (order[effectiveRole(a)] ?? 3) - (order[effectiveRole(b)] ?? 3) ||
             String(a.username || "").localeCompare(String(b.username || ""))
         );
     }
@@ -2334,7 +2368,7 @@ async function openRolesPanel() {
         const visible = users.filter(user =>
             !term ||
             String(user.username || "").toLowerCase().includes(term) ||
-            roleLabel(user.role).toLowerCase().includes(term)
+            roleLabel(effectiveRole(user)).toLowerCase().includes(term)
         );
 
         if (!visible.length) {
@@ -2357,8 +2391,8 @@ async function openRolesPanel() {
                 (user.id === currentUser?.id ? " (you)" : "");
 
             const badge = document.createElement("span");
-            badge.className = `hll-roles-badge hll-roles-badge-${user.role || "player"}`;
-            badge.textContent = roleLabel(user.role);
+            badge.className = `hll-roles-badge hll-roles-badge-${effectiveRole(user) || "player"}`;
+            badge.textContent = roleLabel(effectiveRole(user));
 
             const chevron = document.createElement("span");
             chevron.setAttribute("aria-hidden", "true");
@@ -2377,6 +2411,11 @@ async function openRolesPanel() {
         body.textContent = "";
 
         const isSelf = user.id === currentUser?.id;
+        const currentRole = effectiveRole(user);
+
+        // Only an owner can change an owner. Nobody can change themselves.
+        const ownerLocked = currentRole === "owner" && !viewerIsOwner;
+        const isLocked = isSelf || ownerLocked;
 
         const back = document.createElement("button");
         back.type = "button";
@@ -2397,7 +2436,8 @@ async function openRolesPanel() {
         [
             ["none", "Player (no staff access)"],
             ["moderator", "Moderator"],
-            ["admin", "Admin"]
+            ["admin", "Admin"],
+            ...(viewerIsOwner || currentRole === "owner" ? [["owner", "Owner"]] : [])
         ].forEach(([value, text]) => {
             const option = document.createElement("option");
             option.value = value;
@@ -2405,8 +2445,8 @@ async function openRolesPanel() {
             select.appendChild(option);
         });
 
-        select.value = user.role || "none";
-        select.disabled = isSelf;
+        select.value = currentRole || "none";
+        select.disabled = isLocked;
 
         const permissionBox = document.createElement("div");
         permissionBox.className = "hll-roles-perms";
@@ -2442,17 +2482,22 @@ async function openRolesPanel() {
 
         function refresh() {
             const role = select.value;
-            const admin = role === "admin";
+            const admin = role === "admin" || role === "owner";
 
             permissionBox.hidden = role === "none";
 
             Object.values(checks).forEach(checkbox => {
                 if (admin) checkbox.checked = true;
-                checkbox.disabled = admin || isSelf;
+                checkbox.disabled = admin || isLocked;
             });
 
             if (isSelf) {
                 note.textContent = "You cannot change your own role.";
+            } else if (ownerLocked) {
+                note.textContent = "Only an owner can change an owner's role.";
+            } else if (role === "owner") {
+                note.textContent =
+                    "Owners can do everything admins can, add levels to the Main and Extended List, and manage other owners.";
             } else if (admin) {
                 note.textContent =
                     "Admins can do everything, including managing roles and viewing the logs.";
@@ -2474,19 +2519,24 @@ async function openRolesPanel() {
         save.type = "button";
         save.className = "hll-roles-save";
         save.textContent = "Save changes";
-        save.disabled = isSelf;
+        save.disabled = isLocked;
 
         save.addEventListener("click", async () => {
             const role = select.value;
             const name = user.username || "this player";
 
-            if (role === (user.role || "none") && role !== "moderator") {
+            if (role === (effectiveRole(user) || "none") && role !== "moderator") {
                 status.style.color = "";
                 status.textContent = "Nothing to change.";
                 return;
             }
 
-            if (role === "admin" && user.role !== "admin" && !confirm(
+            if (role === "owner" && effectiveRole(user) !== "owner" && !confirm(
+                `Make ${name} an owner?\n\n` +
+                "Owners can do everything admins can, add levels to the lists, and manage other owners."
+            )) return;
+
+            if (role === "admin" && effectiveRole(user) !== "admin" && !confirm(
                 `Make ${name} an admin?\n\n` +
                 "Admins can manage roles, see the logs and do everything moderators can."
             )) return;
@@ -2499,7 +2549,9 @@ async function openRolesPanel() {
 
             STAFF_PERMISSIONS.forEach(permission => {
                 permissions[permission.key] =
-                    role === "admin" ? true : checks[permission.key].checked;
+                    role === "admin" || role === "owner"
+                        ? true
+                        : checks[permission.key].checked;
             });
 
             save.disabled = true;
@@ -2523,7 +2575,8 @@ async function openRolesPanel() {
                 return;
             }
 
-            user.role = role === "none" ? null : role;
+            user.role = role === "none" ? null : role === "owner" ? "admin" : role;
+            user.is_owner = role === "owner";
             user.permissions = role === "none" ? {} : permissions;
             sortUsers();
 
@@ -2546,6 +2599,9 @@ async function openRolesPanel() {
     search.addEventListener("input", renderList);
 
     body.textContent = "Loading...";
+
+    const viewerInfo = await getStaffInfo();
+    const viewerIsOwner = viewerInfo?.is_owner === true;
 
     const { data, error } = await supabaseClient.rpc("admin_list_users");
 
@@ -2908,6 +2964,502 @@ function setupLevelContextMenu(list, levels, staffInfo) {
             ].filter(entry => staffCan(staffInfo, entry.perm))
         })
     );
+}
+
+/* ---------- Owner: add levels to the lists ---------- */
+
+const LIST_RANGES = {
+    main: { min: 1, max: 150, label: "Main List" },
+    extended: { min: 151, max: 350, label: "Extended List" }
+};
+
+function ensureAddLevelStyles() {
+    if (document.getElementById("hll-addlevel-styles")) return;
+
+    const style = document.createElement("style");
+    style.id = "hll-addlevel-styles";
+    style.textContent = `
+        .hll-owner-bar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 0 0 16px;
+        }
+
+        .hll-owner-add {
+            padding: 10px 18px;
+            background: #f5c04a;
+            border: 0;
+            border-radius: 10px;
+            color: #17171c;
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .hll-owner-add:hover {
+            filter: brightness(1.08);
+        }
+
+        .hll-owner-note {
+            color: #9a9aa6;
+            font-size: 13px;
+        }
+
+        .hll-add-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+            background: rgba(0, 0, 0, .7);
+        }
+
+        .hll-add-box {
+            display: flex;
+            flex-direction: column;
+            width: min(640px, 100%);
+            max-height: 90vh;
+            background: #17171c;
+            border: 1px solid rgba(255, 255, 255, .14);
+            border-radius: 12px;
+            box-shadow: 0 16px 48px rgba(0, 0, 0, .6);
+            color: #f2f2f5;
+        }
+
+        .hll-add-header,
+        .hll-add-footer {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 18px;
+        }
+
+        .hll-add-header {
+            justify-content: space-between;
+            border-bottom: 1px solid rgba(255, 255, 255, .1);
+        }
+
+        .hll-add-header h3 {
+            margin: 0;
+            font-size: 17px;
+        }
+
+        .hll-add-footer {
+            justify-content: flex-end;
+            border-top: 1px solid rgba(255, 255, 255, .1);
+        }
+
+        .hll-add-message {
+            margin-right: auto;
+            font-size: 13px;
+        }
+
+        .hll-add-body {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+            padding: 16px 18px;
+            overflow-y: auto;
+        }
+
+        .hll-add-field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .hll-add-wide {
+            grid-column: 1 / -1;
+        }
+
+        .hll-add-label {
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .hll-add-hint {
+            color: #9a9aa6;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+
+        .hll-add-box input,
+        .hll-add-box select,
+        .hll-add-box textarea {
+            width: 100%;
+            padding: 9px 10px;
+            box-sizing: border-box;
+            background: #0f0f13;
+            border: 1px solid rgba(255, 255, 255, .16);
+            border-radius: 8px;
+            color: inherit;
+            font: inherit;
+        }
+
+        .hll-add-box textarea {
+            min-height: 90px;
+            resize: vertical;
+        }
+
+        .hll-add-preview {
+            max-height: 90px;
+            max-width: 100%;
+            border-radius: 8px;
+            object-fit: cover;
+        }
+
+        .hll-add-preview[hidden] {
+            display: none;
+        }
+
+        .hll-add-box button {
+            padding: 9px 16px;
+            background: rgba(255, 255, 255, .08);
+            border: 0;
+            border-radius: 8px;
+            color: inherit;
+            font: inherit;
+            cursor: pointer;
+        }
+
+        .hll-add-box button.hll-add-submit {
+            background: #f5c04a;
+            color: #17171c;
+            font-weight: 700;
+        }
+
+        .hll-add-box button:disabled {
+            opacity: .55;
+            cursor: wait;
+        }
+
+        @media (max-width: 560px) {
+            .hll-add-body {
+                grid-template-columns: 1fr;
+            }
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+function openAddLevelModal(currentListType, levels) {
+    if (document.getElementById("hll-addlevel-modal")) return;
+
+    ensureAddLevelStyles();
+
+    const make = (tag, className, text) => {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+    };
+
+    // Wraps a control in a labelled field and returns { wrap, hint }.
+    function field(labelText, control, hintText, extraClass = "") {
+        const wrap = make("label", `hll-add-field ${extraClass}`.trim());
+        const hint = make("span", "hll-add-hint", hintText || "");
+
+        wrap.append(make("span", "hll-add-label", labelText), control, hint);
+
+        return { wrap, hint };
+    }
+
+    const overlay = make("div", "hll-add-overlay");
+    overlay.id = "hll-addlevel-modal";
+
+    const form = make("form", "hll-add-box");
+    form.noValidate = true;
+    form.setAttribute("role", "dialog");
+    form.setAttribute("aria-modal", "true");
+
+    const header = make("div", "hll-add-header");
+    const closeButton = make("button", "", "Close");
+    closeButton.type = "button";
+    header.append(make("h3", "", "Add a level"), closeButton);
+
+    const body = make("div", "hll-add-body");
+
+    const nameInput = make("input");
+    nameInput.type = "text";
+    nameInput.maxLength = 100;
+    nameInput.placeholder = "e.g. Bloodbath";
+
+    const creatorInput = make("input");
+    creatorInput.type = "text";
+    creatorInput.maxLength = 100;
+    creatorInput.placeholder = "Creator or creators";
+
+    const idInput = make("input");
+    idInput.type = "text";
+    idInput.inputMode = "numeric";
+    idInput.maxLength = 12;
+    idInput.placeholder = "e.g. 10565740";
+
+    const listSelect = make("select");
+
+    Object.entries(LIST_RANGES).forEach(([key, range]) => {
+        const option = make("option", "", `${range.label} (#${range.min}–#${range.max})`);
+        option.value = key;
+        listSelect.appendChild(option);
+    });
+
+    listSelect.value = currentListType;
+
+    const positionInput = make("input");
+    positionInput.type = "number";
+    positionInput.step = "1";
+
+    const pointsInput = make("input");
+    pointsInput.type = "number";
+    pointsInput.min = "0";
+    pointsInput.step = "1";
+    pointsInput.placeholder = "Automatic";
+
+    const bannerInput = make("input");
+    bannerInput.type = "url";
+    bannerInput.placeholder = "https://...";
+
+    const preview = make("img", "hll-add-preview");
+    preview.alt = "Banner preview";
+    preview.hidden = true;
+
+    const descriptionInput = make("textarea");
+    descriptionInput.maxLength = 2000;
+    descriptionInput.placeholder = "Optional. Shown on the level's page.";
+
+    const nameField = field("Level name *", nameInput, "", "hll-add-wide");
+    const creatorField = field("Creator *", creatorInput, "");
+    const idField = field("Geometry Dash level ID", idInput, "Numbers only. Optional.");
+    const listField = field("List", listSelect, "");
+    const positionField = field("Position", positionInput, "");
+    const pointsField = field(
+        "Custom points",
+        pointsInput,
+        "Leave empty to calculate the points from the position automatically."
+    );
+    const bannerField = field("Banner image URL", bannerInput, "Optional. A direct link to an image.", "hll-add-wide");
+    bannerField.wrap.insertBefore(preview, bannerField.hint);
+    const descriptionField = field("Description", descriptionInput, "", "hll-add-wide");
+
+    body.append(
+        nameField.wrap,
+        creatorField.wrap,
+        idField.wrap,
+        listField.wrap,
+        positionField.wrap,
+        pointsField.wrap,
+        bannerField.wrap,
+        descriptionField.wrap
+    );
+
+    const footer = make("div", "hll-add-footer");
+    const message = make("span", "hll-add-message");
+    const cancelButton = make("button", "", "Cancel");
+    cancelButton.type = "button";
+    const submitButton = make("button", "hll-add-submit", "Add level");
+    submitButton.type = "submit";
+
+    footer.append(message, cancelButton, submitButton);
+    form.append(header, body, footer);
+    overlay.appendChild(form);
+    document.body.appendChild(overlay);
+
+    function showMessage(text, color) {
+        message.textContent = text;
+        message.style.color = color || "";
+    }
+
+    function onKey(event) {
+        if (event.key === "Escape") close();
+    }
+
+    function close() {
+        overlay.remove();
+        document.removeEventListener("keydown", onKey);
+
+        if (location.hash === "#add-level") clearUrlHash();
+    }
+
+    closeButton.addEventListener("click", close);
+    cancelButton.addEventListener("click", close);
+    document.addEventListener("keydown", onKey);
+
+    function updatePositionHint() {
+        const range = LIST_RANGES[listSelect.value];
+
+        positionInput.min = String(range.min);
+        positionInput.max = String(range.max);
+        positionInput.placeholder = "Bottom of the list";
+
+        let text = `${range.label}: #${range.min} to #${range.max}. Leave empty to add it at the bottom. ` +
+            "Levels at or below the position move down one place.";
+
+        if (listSelect.value === currentListType) {
+            const ranks = levels
+                .map(level => Number(level.rank))
+                .filter(Number.isInteger);
+
+            const next = ranks.length ? Math.max(...ranks) + 1 : range.min;
+
+            text = next > range.max
+                ? `${range.label} is full (#${range.max} is taken), so no level can be added.`
+                : `${text} The bottom is currently #${next}.`;
+        }
+
+        positionField.hint.textContent = text;
+    }
+
+    listSelect.addEventListener("change", updatePositionHint);
+    updatePositionHint();
+
+    // Clear an old error as soon as the person edits anything.
+    form.addEventListener("input", () => showMessage(""));
+
+    bannerInput.addEventListener("change", () => {
+        const value = bannerInput.value.trim();
+
+        preview.hidden = true;
+
+        if (!value || !validHttpUrl(value)) return;
+
+        preview.onload = () => { preview.hidden = false; };
+        preview.onerror = () => { preview.hidden = true; };
+        preview.src = value;
+    });
+
+    form.addEventListener("submit", async event => {
+        event.preventDefault();
+
+        const name = nameInput.value.trim();
+        const creator = creatorInput.value.trim();
+        const levelId = idInput.value.trim();
+        const listType = listSelect.value;
+        const range = LIST_RANGES[listType];
+        const positionText = positionInput.value.trim();
+        const pointsText = pointsInput.value.trim();
+        const banner = bannerInput.value.trim();
+        const description = descriptionInput.value.trim();
+
+        if (!name) return showMessage("Enter the level name.", "#ff6b6b");
+        if (!creator) return showMessage("Enter the creator.", "#ff6b6b");
+
+        if (levelId && !/^\d{1,12}$/.test(levelId)) {
+            return showMessage("The Geometry Dash level ID must be numbers only.", "#ff6b6b");
+        }
+
+        let position = null;
+
+        if (positionText) {
+            position = Number(positionText);
+
+            if (!Number.isInteger(position) || position < range.min || position > range.max) {
+                return showMessage(
+                    `Position must be a whole number from #${range.min} to #${range.max} for the ${range.label}.`,
+                    "#ff6b6b"
+                );
+            }
+        }
+
+        let points = null;
+
+        if (pointsText) {
+            points = Number(pointsText);
+
+            if (!Number.isInteger(points) || points < 0) {
+                return showMessage("Custom points must be a whole number, 0 or higher.", "#ff6b6b");
+            }
+        }
+
+        if (banner && !validHttpUrl(banner)) {
+            return showMessage("The banner must be a link starting with https:// or http://.", "#ff6b6b");
+        }
+
+        if (position !== null && !confirm(
+            `Add "${name}" at #${position} in the ${range.label}?\n\n` +
+            "Levels at or below that position move down one place."
+        )) return;
+
+        submitButton.disabled = true;
+        submitButton.textContent = "Adding...";
+        showMessage("");
+
+        const { data, error } = await supabaseClient.rpc("owner_add_level", {
+            p_name: name,
+            p_level_id: levelId || null,
+            p_creator: creator,
+            p_list_type: listType,
+            p_rank: position,
+            p_description: description || null,
+            p_banner_url: banner || null,
+            p_points: points
+        });
+
+        submitButton.disabled = false;
+        submitButton.textContent = "Add level";
+
+        if (error) {
+            console.error("Add level failed:", error);
+
+            showMessage(
+                /owner_add_level|schema cache/i.test(error.message || "") && !/permission|authorization/i.test(error.message || "")
+                    ? "Adding levels is not installed in the database yet."
+                    : getErrorMessage(error),
+                "#ff6b6b"
+            );
+
+            return;
+        }
+
+        showMessage(`Added at #${data?.rank ?? "?"}. Reloading...`, "#42d392");
+
+        clearUrlHash();
+
+        setTimeout(() => {
+            if (listType === currentListType) {
+                reloadPage();
+            } else {
+                location.href = listType === "main" ? "main-list.html" : "extended-list.html";
+            }
+        }, 600);
+    });
+
+    nameInput.focus();
+}
+
+// Owner-only "Add level" button above the list (also opened by #add-level).
+function setupOwnerAddLevel(list, listType, levels) {
+    if (!list || document.getElementById("hll-owner-bar")) return;
+
+    ensureAddLevelStyles();
+
+    const bar = document.createElement("div");
+    bar.id = "hll-owner-bar";
+    bar.className = "hll-owner-bar";
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "hll-owner-add";
+    button.textContent = "+ Add level";
+
+    const note = document.createElement("span");
+    note.className = "hll-owner-note";
+    note.textContent = "Owner tools";
+
+    bar.append(button, note);
+    list.insertAdjacentElement("beforebegin", bar);
+
+    button.addEventListener("click", () => openAddLevelModal(listType, levels));
+
+    function openFromHash() {
+        if (location.hash === "#add-level") openAddLevelModal(listType, levels);
+    }
+
+    window.addEventListener("hashchange", openFromHash);
+    openFromHash();
 }
 
 // Staff-only panel under the list showing removed levels with a Restore button.
