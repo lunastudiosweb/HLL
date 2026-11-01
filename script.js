@@ -6263,6 +6263,8 @@ async function setupStaffDashboard() {
             loadLevelSubmissionQueue(),
             loadCompletionSubmissionQueue()
         ]);
+
+        startLiveSubmissionUpdates();
     } catch (error) {
         console.error("HLL staff dashboard error:", error);
 
@@ -6276,6 +6278,89 @@ async function setupStaffDashboard() {
 
         levelQueue.innerHTML = "<p>Could not load level submissions.</p>";
         completionQueue.innerHTML = "<p>Could not load completion submissions.</p>";
+    }
+
+    // New submissions appear here the moment they are sent. Uses Supabase
+    // Realtime, with a slow refresh as a safety net if it is not enabled.
+    function startLiveSubmissionUpdates() {
+        let timer = null;
+        let realtimeWorking = false;
+
+        function showToast(text) {
+            let toast = document.getElementById("hll-live-toast");
+
+            if (!toast) {
+                toast = document.createElement("div");
+                toast.id = "hll-live-toast";
+                toast.setAttribute("role", "status");
+                toast.style.cssText =
+                    "position:fixed;right:20px;bottom:20px;z-index:9999;" +
+                    "padding:12px 16px;border-radius:12px;font-size:14px;" +
+                    "background:#14161d;color:#fff;border:1px solid rgba(228,71,82,.5);" +
+                    "box-shadow:0 12px 30px rgba(0,0,0,.5);transition:opacity .3s;";
+                document.body.appendChild(toast);
+            }
+
+            toast.textContent = text;
+            toast.style.opacity = "1";
+
+            clearTimeout(toast._hide);
+            toast._hide = setTimeout(() => { toast.style.opacity = "0"; }, 4000);
+        }
+
+        function refresh(message) {
+            clearTimeout(timer);
+
+            timer = setTimeout(async () => {
+                try {
+                    await Promise.all([
+                        loadLevelSubmissionQueue(),
+                        loadCompletionSubmissionQueue()
+                    ]);
+
+                    if (message) showToast(message);
+                } catch (refreshError) {
+                    console.warn("Live refresh failed:", refreshError);
+                }
+            }, 300);
+        }
+
+        try {
+            supabaseClient
+                .channel("hll-staff-submissions")
+                .on(
+                    "postgres_changes",
+                    { event: "*", schema: "public", table: "completion_submissions" },
+                    payload => {
+                        realtimeWorking = true;
+                        refresh(
+                            payload.eventType === "INSERT"
+                                ? "New completion submission"
+                                : null
+                        );
+                    }
+                )
+                .on(
+                    "postgres_changes",
+                    { event: "*", schema: "public", table: "level_submissions" },
+                    payload => {
+                        realtimeWorking = true;
+                        refresh(
+                            payload.eventType === "INSERT"
+                                ? "New level submission"
+                                : null
+                        );
+                    }
+                )
+                .subscribe();
+        } catch (realtimeError) {
+            console.warn("Realtime unavailable:", realtimeError);
+        }
+
+        // Safety net: quiet refresh every 30s unless realtime is delivering.
+        setInterval(() => {
+            if (!realtimeWorking && !document.hidden) refresh(null);
+        }, 30000);
     }
 
     async function loadLevelSubmissionQueue() {
