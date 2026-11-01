@@ -4296,6 +4296,239 @@ async function renderLevelRankHistory(level, anchor) {
     anchor.insertAdjacentElement("beforebegin", card);
 }
 
+/* =========================================================
+   PROFILE PICTURE AND BANNER
+   ========================================================= */
+
+const PROFILE_MEDIA_BUCKET = "profile-media";
+const PROFILE_MEDIA_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+
+function ensureProfileMediaStyles() {
+    if (document.getElementById("hll-media-styles")) return;
+
+    const style = document.createElement("style");
+    style.id = "hll-media-styles";
+    style.textContent = `
+        .hll-avatar-sm { width: 26px; height: 26px; margin-right: 8px; border-radius: 50%; object-fit: cover; vertical-align: middle; background: #1d1f27; border: 1px solid rgba(255,255,255,.12); }
+        .hll-profile-banner { width: 100%; height: clamp(110px, 22vw, 220px); margin: 0 0 20px; border: 1px solid rgba(255,255,255,.09); border-radius: 16px; background-color: #14161d; background-position: center; background-size: cover; box-shadow: inset 0 -60px 60px -40px rgba(10,11,14,.7); }
+        .hll-media-card .hll-media-row { display: grid; gap: 12px; margin-bottom: 22px; }
+        .hll-media-card .hll-media-preview-avatar { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; background: #1d1f27; border: 1px solid rgba(255,255,255,.14); }
+        .hll-media-card .hll-media-preview-banner { width: 100%; height: 120px; border-radius: 12px; object-fit: cover; background: #14161d; border: 1px solid rgba(255,255,255,.1); }
+        .hll-media-card .hll-media-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+        .hll-media-card input[type="file"] { display: none; }
+        .hll-media-card .hll-media-hint { color: #8d909c; font-size: 13px; }
+        .hll-media-card .hll-media-status { min-height: 20px; font-size: 14px; }
+    `;
+    document.head.appendChild(style);
+}
+
+function profileImageAllowed(file, maxMB) {
+    if (!PROFILE_MEDIA_TYPES.includes(file.type)) {
+        return "Choose a PNG, JPG, WebP or GIF image.";
+    }
+
+    if (file.size > maxMB * 1024 * 1024) {
+        return `That image is too large. The limit is ${maxMB} MB.`;
+    }
+
+    return "";
+}
+
+async function uploadProfileImage(userId, kind, file) {
+    const extension = (file.name.split(".").pop() || "png").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const path = `${userId}/${kind}-${Date.now()}.${extension}`;
+
+    const { error } = await supabaseClient.storage
+        .from(PROFILE_MEDIA_BUCKET)
+        .upload(path, file, { contentType: file.type, upsert: false });
+
+    if (error) throw error;
+
+    // Best effort: delete this user's older images of the same kind.
+    try {
+        const { data: files } = await supabaseClient.storage
+            .from(PROFILE_MEDIA_BUCKET)
+            .list(userId);
+
+        const old = (files || [])
+            .filter(item => item.name.startsWith(`${kind}-`) && `${userId}/${item.name}` !== path)
+            .map(item => `${userId}/${item.name}`);
+
+        if (old.length) {
+            await supabaseClient.storage.from(PROFILE_MEDIA_BUCKET).remove(old);
+        }
+    } catch { /* cleanup is optional */ }
+
+    return supabaseClient.storage.from(PROFILE_MEDIA_BUCKET).getPublicUrl(path).data.publicUrl;
+}
+
+async function fetchProfileBanner(profileId) {
+    const { data, error } = await supabaseClient
+        .from("profiles")
+        .select("banner_url")
+        .eq("id", profileId)
+        .maybeSingle();
+
+    // Column not created yet: no banners.
+    if (error || !data) return null;
+
+    return data.banner_url && validHttpUrl(data.banner_url) ? data.banner_url : null;
+}
+
+async function renderProfileBanner(profile, anchor) {
+    document.getElementById("hll-profile-banner")?.remove();
+
+    const url = await fetchProfileBanner(profile.id);
+
+    if (!url || !anchor) return;
+
+    ensureProfileMediaStyles();
+
+    const banner = document.createElement("div");
+    banner.id = "hll-profile-banner";
+    banner.className = "hll-profile-banner";
+    banner.setAttribute("role", "img");
+    banner.setAttribute("aria-label", `${profile.username || "Player"}'s banner`);
+    banner.style.backgroundImage = `url("${url.replace(/"/g, "%22")}")`;
+
+    anchor.insertAdjacentElement("beforebegin", banner);
+}
+
+function setupProfileMedia(user, profile, form) {
+    if (document.getElementById("hll-media-card")) return;
+
+    ensureProfileMediaStyles();
+
+    const card = document.createElement("section");
+    card.id = "hll-media-card";
+    card.className = "settings-section hll-media-card";
+    card.innerHTML = `
+        <h2>Profile picture and banner</h2>
+        <p class="settings-section-description">
+            Other players can see these on your profile. PNG, JPG, WebP or GIF.
+        </p>
+
+        <div class="hll-media-row">
+            <strong>Profile picture</strong>
+            <img class="hll-media-preview-avatar" id="hll-avatar-preview" alt="Profile picture preview" hidden>
+            <div class="hll-media-actions">
+                <label class="settings-button settings-button-secondary" for="hll-avatar-file">Upload picture</label>
+                <input type="file" id="hll-avatar-file" accept="image/png,image/jpeg,image/webp,image/gif">
+                <button type="button" class="settings-button settings-button-secondary" id="hll-avatar-remove">Remove</button>
+            </div>
+            <span class="hll-media-hint">Square images look best. Up to 2 MB.</span>
+        </div>
+
+        <div class="hll-media-row">
+            <strong>Banner</strong>
+            <img class="hll-media-preview-banner" id="hll-banner-preview" alt="Banner preview" hidden>
+            <div class="hll-media-actions">
+                <label class="settings-button settings-button-secondary" for="hll-banner-file">Upload banner</label>
+                <input type="file" id="hll-banner-file" accept="image/png,image/jpeg,image/webp,image/gif">
+                <button type="button" class="settings-button settings-button-secondary" id="hll-banner-remove">Remove</button>
+            </div>
+            <span class="hll-media-hint">Wide images look best (about 1500 × 400). Up to 4 MB.</span>
+        </div>
+
+        <div class="hll-media-status" id="hll-media-status" role="status"></div>
+    `;
+
+    const anchor = form.closest(".settings-section") || form;
+    anchor.insertAdjacentElement("afterend", card);
+
+    const status = card.querySelector("#hll-media-status");
+    const avatarPreview = card.querySelector("#hll-avatar-preview");
+    const bannerPreview = card.querySelector("#hll-banner-preview");
+
+    function say(text, type) {
+        status.textContent = text;
+        status.style.color = type === "error" ? "#fca5a5" : type === "success" ? "#86efac" : "#a3a6b3";
+    }
+
+    function paint(preview, url) {
+        if (url && validHttpUrl(url)) {
+            preview.src = url;
+            preview.hidden = false;
+        } else {
+            preview.removeAttribute("src");
+            preview.hidden = true;
+        }
+    }
+
+    paint(avatarPreview, profile.avatar_url);
+
+    fetchProfileBanner(user.id).then(url => paint(bannerPreview, url));
+
+    async function save(kind, url) {
+        const column = kind === "avatar" ? "avatar_url" : "banner_url";
+
+        const { error } = await supabaseClient
+            .from("profiles")
+            .update({ [column]: url })
+            .eq("id", user.id);
+
+        if (error) {
+            if (/banner_url|column|schema cache/i.test(error.message || "")) {
+                throw new Error("Banners are not set up in the database yet. Run the profile media SQL first.");
+            }
+
+            throw error;
+        }
+
+        if (kind === "avatar") {
+            currentProfile = { ...currentProfile, avatar_url: url };
+
+            const field = $("settings-avatar");
+            if (field) field.value = url || "";
+
+            paint(avatarPreview, url);
+        } else {
+            paint(bannerPreview, url);
+        }
+    }
+
+    function bind(kind, maxMB) {
+        const input = card.querySelector(`#hll-${kind}-file`);
+        const remove = card.querySelector(`#hll-${kind}-remove`);
+
+        input.addEventListener("change", async () => {
+            const file = input.files && input.files[0];
+            input.value = "";
+
+            if (!file) return;
+
+            const problem = profileImageAllowed(file, maxMB);
+
+            if (problem) {
+                say(problem, "error");
+                return;
+            }
+
+            say("Uploading...", "info");
+
+            try {
+                const url = await uploadProfileImage(user.id, kind, file);
+                await save(kind, url);
+                say(kind === "avatar" ? "Profile picture updated." : "Banner updated.", "success");
+            } catch (error) {
+                say(getErrorMessage(error), "error");
+            }
+        });
+
+        remove.addEventListener("click", async () => {
+            try {
+                await save(kind, null);
+                say(kind === "avatar" ? "Profile picture removed." : "Banner removed.", "success");
+            } catch (error) {
+                say(getErrorMessage(error), "error");
+            }
+        });
+    }
+
+    bind("avatar", 2);
+    bind("banner", 4);
+}
+
 async function renderPlayersList() {
     const list = $("player-list");
     const count = $("player-count");
@@ -4316,7 +4549,7 @@ async function renderPlayersList() {
     ] = await Promise.all([
         supabaseClient
             .from("profiles")
-            .select("id, username, gd_username, points_adjustment, leaderboard_hidden")
+            .select("id, username, gd_username, avatar_url, show_avatar, points_adjustment, leaderboard_hidden")
             .order("username", { ascending: true }),
 
         supabaseClient
@@ -4431,6 +4664,7 @@ async function renderPlayersList() {
     }
 
     ensureBadgeStyles();
+    ensureProfileMediaStyles();
 
     const badgeMap = await fetchBadgeMap();
 
@@ -4513,6 +4747,9 @@ async function renderPlayersList() {
 
                     <span class="ranking-details">
                         <span class="hll-name-line">
+                            ${player.show_avatar !== false && player.avatar_url && validHttpUrl(player.avatar_url)
+                                ? `<img class="hll-avatar-sm" src="${escapeHTML(player.avatar_url)}" alt="" loading="lazy">`
+                                : ""}
                             <strong>${escapeHTML(player.username || "Player")}</strong>
                             ${badgeChipsHTML(player.badges)}
                         </span>
@@ -5585,6 +5822,11 @@ async function renderProfile() {
         }
     }
 
+    renderProfileBanner(
+        profile,
+        heading.closest("section") || heading.parentElement
+    ).catch(bannerError => console.warn("Banner unavailable:", bannerError));
+
     await renderPlayerStatistics(profile, {
         actions,
         rank,
@@ -5889,6 +6131,12 @@ async function setupSettings() {
     }
 
     currentProfile = profile;
+
+    try {
+        setupProfileMedia(user, profile, form);
+    } catch (mediaError) {
+        console.warn("Profile media unavailable:", mediaError);
+    }
 
     if ($("settings-username")) {
         $("settings-username").value = profile.username || "";
