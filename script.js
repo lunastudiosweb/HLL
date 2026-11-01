@@ -4309,6 +4309,13 @@ function ensureProfileMediaStyles() {
     const style = document.createElement("style");
     style.id = "hll-media-styles";
     style.textContent = `
+        .hll-player-avatar { position: relative; flex: 0 0 64px; width: 64px; height: 64px; margin-right: 6px; }
+        .hll-player-avatar img, .hll-avatar-fallback { display: grid; width: 64px; height: 64px; place-items: center; border-radius: 50%; object-fit: cover; background: linear-gradient(160deg, #262a35, #1b1e27); border: 2px solid rgba(255,255,255,.12); color: #d8dbe3; font-size: 24px; font-weight: 750; }
+        .hll-rank-chip { position: absolute; right: -8px; bottom: -4px; min-width: 30px; padding: 2px 7px; border: 2px solid #0f1015; border-radius: 999px; background: #2b2f3b; color: #e8eaf0; font-size: 12px; font-weight: 800; line-height: 1.4; text-align: center; font-variant-numeric: tabular-nums; }
+        .hll-rank-chip.rank-first { background: #c9a13b; color: #1c1405; }
+        .hll-rank-chip.rank-second { background: #aeb6c6; color: #14171d; }
+        .hll-rank-chip.rank-third { background: #c07a52; color: #1d0f07; }
+        @media (max-width: 600px) { .hll-player-avatar, .hll-player-avatar img, .hll-avatar-fallback { width: 52px; height: 52px; flex-basis: 52px; } .hll-avatar-fallback { font-size: 20px; } }
         .hll-avatar-sm { width: 38px; height: 38px; margin-right: 10px; border-radius: 50%; object-fit: cover; vertical-align: middle; background: #1d1f27; border: 1px solid rgba(255,255,255,.12); }
         #profile-avatar { width: clamp(110px, 24vw, 160px) !important; height: clamp(110px, 24vw, 160px) !important; max-width: none !important; border-radius: 50% !important; object-fit: cover; border: 3px solid rgba(255,255,255,.14); box-shadow: 0 10px 30px -10px rgba(0,0,0,.8); }
         .hll-profile-banner { width: 100%; height: clamp(110px, 22vw, 220px); margin: 0 0 20px; border: 1px solid rgba(255,255,255,.09); border-radius: 16px; background-color: #14161d; background-position: center; background-size: cover; box-shadow: inset 0 -60px 60px -40px rgba(10,11,14,.7); }
@@ -4727,8 +4734,8 @@ async function renderPlayersList() {
             return;
         }
 
-        list.innerHTML = items.map((player, index) => {
-            const position = index + 1;
+        list.innerHTML = items.map(player => {
+            const position = players.indexOf(player) + 1;
 
             let rankClass = "";
 
@@ -4742,15 +4749,15 @@ async function renderPlayersList() {
                     data-player-id="${escapeHTML(player.id)}"
                     href="profile.html?id=${encodeURIComponent(player.id)}"
                 >
-                    <span class="ranking-position ${rankClass}">
-                        #${position}
+                    <span class="hll-player-avatar">
+                        ${player.show_avatar !== false && player.avatar_url && validHttpUrl(player.avatar_url)
+                            ? `<img src="${escapeHTML(player.avatar_url)}" alt="" loading="lazy">`
+                            : `<span class="hll-avatar-fallback">${escapeHTML((player.username || "?").charAt(0).toUpperCase())}</span>`}
+                        <span class="hll-rank-chip ${rankClass}">#${position}</span>
                     </span>
 
                     <span class="ranking-details">
                         <span class="hll-name-line">
-                            ${player.show_avatar !== false && player.avatar_url && validHttpUrl(player.avatar_url)
-                                ? `<img class="hll-avatar-sm" src="${escapeHTML(player.avatar_url)}" alt="" loading="lazy">`
-                                : ""}
                             <strong>${escapeHTML(player.username || "Player")}</strong>
                             ${badgeChipsHTML(player.badges)}
                         </span>
