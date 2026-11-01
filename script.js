@@ -4309,10 +4309,11 @@ function ensureProfileMediaStyles() {
     const style = document.createElement("style");
     style.id = "hll-media-styles";
     style.textContent = `
-        .hll-avatar-sm { width: 26px; height: 26px; margin-right: 8px; border-radius: 50%; object-fit: cover; vertical-align: middle; background: #1d1f27; border: 1px solid rgba(255,255,255,.12); }
+        .hll-avatar-sm { width: 38px; height: 38px; margin-right: 10px; border-radius: 50%; object-fit: cover; vertical-align: middle; background: #1d1f27; border: 1px solid rgba(255,255,255,.12); }
+        #profile-avatar { width: clamp(110px, 24vw, 160px) !important; height: clamp(110px, 24vw, 160px) !important; max-width: none !important; border-radius: 50% !important; object-fit: cover; border: 3px solid rgba(255,255,255,.14); box-shadow: 0 10px 30px -10px rgba(0,0,0,.8); }
         .hll-profile-banner { width: 100%; height: clamp(110px, 22vw, 220px); margin: 0 0 20px; border: 1px solid rgba(255,255,255,.09); border-radius: 16px; background-color: #14161d; background-position: center; background-size: cover; box-shadow: inset 0 -60px 60px -40px rgba(10,11,14,.7); }
         .hll-media-card .hll-media-row { display: grid; gap: 12px; margin-bottom: 22px; }
-        .hll-media-card .hll-media-preview-avatar { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; background: #1d1f27; border: 1px solid rgba(255,255,255,.14); }
+        .hll-media-card .hll-media-preview-avatar { width: 120px; height: 120px; border-radius: 50%; object-fit: cover; background: #1d1f27; border: 1px solid rgba(255,255,255,.14); }
         .hll-media-card .hll-media-preview-banner { width: 100%; height: 120px; border-radius: 12px; object-fit: cover; background: #14161d; border: 1px solid rgba(255,255,255,.1); }
         .hll-media-card .hll-media-actions { display: flex; flex-wrap: wrap; gap: 10px; }
         .hll-media-card input[type="file"] { display: none; }
@@ -5808,6 +5809,8 @@ async function renderProfile() {
 
     if ($("profile-avatar")) {
         const avatar = $("profile-avatar");
+
+        ensureProfileMediaStyles();
 
         if (
             profile.show_avatar !== false &&
