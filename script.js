@@ -6222,6 +6222,9 @@ async function setupSettings() {
    ========================================================= */
 
 async function setupStaffDashboard() {
+    let newestFirst = false;
+    let filterTerm = "";
+
     const statusElement = $("staff-status");
     const levelQueue = $("staff-level-queue");
     const completionQueue = $("staff-completion-queue");
@@ -6264,6 +6267,8 @@ async function setupStaffDashboard() {
             loadCompletionSubmissionQueue()
         ]);
 
+        ensureDashboardStyles();
+        addDashboardToolbar();
         startLiveSubmissionUpdates();
     } catch (error) {
         console.error("HLL staff dashboard error:", error);
@@ -6280,6 +6285,116 @@ async function setupStaffDashboard() {
         completionQueue.innerHTML = "<p>Could not load completion submissions.</p>";
     }
 
+    function showLiveToast(text) {
+        let toast = document.getElementById("hll-live-toast");
+
+        if (!toast) {
+            toast = document.createElement("div");
+            toast.id = "hll-live-toast";
+            toast.setAttribute("role", "status");
+            toast.style.cssText =
+                "position:fixed;right:20px;bottom:20px;z-index:9999;" +
+                "padding:12px 16px;border-radius:12px;font-size:14px;" +
+                "background:#14161d;color:#fff;border:1px solid rgba(228,71,82,.5);" +
+                "box-shadow:0 12px 30px rgba(0,0,0,.5);transition:opacity .3s;";
+            document.body.appendChild(toast);
+        }
+
+        toast.textContent = text;
+        toast.style.opacity = "1";
+
+        clearTimeout(toast._hide);
+        toast._hide = setTimeout(() => { toast.style.opacity = "0"; }, 4000);
+    }
+
+    function timeAgo(value) {
+        if (!value) return "";
+
+        const seconds = Math.max(0, (Date.now() - new Date(value).getTime()) / 1000);
+
+        if (!Number.isFinite(seconds)) return "";
+        if (seconds < 60) return "just now";
+        if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+        if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+
+        return `${Math.floor(seconds / 86400)}d ago`;
+    }
+
+    function applyDashboardFilter() {
+        document.querySelectorAll(".staff-review-card").forEach(card => {
+            card.hidden =
+                !!filterTerm &&
+                !(card.dataset.search || "").includes(filterTerm);
+        });
+    }
+
+    function ensureDashboardStyles() {
+        if (document.getElementById("hll-dashboard-styles")) return;
+
+        const style = document.createElement("style");
+        style.id = "hll-dashboard-styles";
+        style.textContent = `
+            .hll-dash-toolbar { display:flex; flex-wrap:wrap; gap:10px; margin:0 0 18px; }
+            .hll-dash-toolbar input { flex:1 1 240px; min-height:42px; padding:0 14px; border:1px solid rgba(255,255,255,.12); border-radius:10px; background:#0f1015; color:#f3f4f7; font:inherit; }
+            .hll-dash-toolbar input:focus { outline:none; border-color:rgba(228,71,82,.6); box-shadow:0 0 0 3px rgba(228,71,82,.12); }
+            .hll-dash-toolbar button { min-height:42px; padding:0 16px; border:1px solid rgba(255,255,255,.14); border-radius:10px; background:rgba(255,255,255,.04); color:#e4e5ea; cursor:pointer; font:inherit; }
+            .staff-review-card { display:grid; gap:8px; margin-bottom:12px; padding:16px 18px; border:1px solid rgba(255,255,255,.09); border-radius:14px; background:linear-gradient(150deg, rgba(255,255,255,.04), transparent 60%), #0f1015; }
+            .staff-review-card[hidden] { display:none; }
+            .staff-review-card h3 { margin:0; font-size:17px; }
+            .staff-review-card p { margin:0; color:#a3a6b3; font-size:14px; line-height:1.5; }
+            .hll-dash-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+            .hll-dash-time { color:#737785; font-size:12px; white-space:nowrap; }
+            .hll-dash-chips { display:flex; flex-wrap:wrap; gap:6px; }
+            .hll-dash-chips span { padding:3px 9px; border:1px solid rgba(255,255,255,.1); border-radius:999px; background:rgba(255,255,255,.04); color:#c4c7d0; font-size:12px; }
+            .staff-review-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:4px; }
+            .staff-review-actions a { color:#7fb4ff; font-size:14px; text-decoration:none; margin-right:auto; }
+            .staff-review-actions a:hover { text-decoration:underline; }
+            .staff-review-actions button { min-height:38px; padding:0 16px; border:1px solid transparent; border-radius:9px; cursor:pointer; font:inherit; font-weight:600; color:#fff; }
+            .staff-approve-button { background:#1f8f5f; }
+            .staff-approve-button:hover:not(:disabled) { background:#25a16c; }
+            .staff-reject-button { background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.14)!important; }
+            .staff-reject-button:hover:not(:disabled) { background:#7f1d1d; }
+            .staff-review-actions button:disabled { opacity:.55; cursor:not-allowed; }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function addDashboardToolbar() {
+        if (document.getElementById("hll-dash-toolbar")) return;
+
+        const toolbar = document.createElement("div");
+        toolbar.id = "hll-dash-toolbar";
+        toolbar.className = "hll-dash-toolbar";
+
+        const search = document.createElement("input");
+        search.type = "search";
+        search.placeholder = "Search submissions by level, player or notes";
+        search.addEventListener("input", () => {
+            filterTerm = search.value.trim().toLowerCase();
+            applyDashboardFilter();
+        });
+
+        const sort = document.createElement("button");
+        sort.type = "button";
+        sort.textContent = "Sort: oldest first";
+        sort.addEventListener("click", async () => {
+            newestFirst = !newestFirst;
+            sort.textContent = newestFirst ? "Sort: newest first" : "Sort: oldest first";
+
+            await Promise.all([
+                loadLevelSubmissionQueue(),
+                loadCompletionSubmissionQueue()
+            ]);
+        });
+
+        toolbar.append(search, sort);
+
+        const anchor =
+            levelQueue.closest("section") || levelQueue.parentElement || levelQueue;
+
+        anchor.insertAdjacentElement("beforebegin", toolbar);
+    }
+
     // New submissions appear here the moment they are sent. Uses Supabase
     // Realtime, with a slow refresh as a safety net if it is not enabled.
     function startLiveSubmissionUpdates() {
@@ -6287,25 +6402,7 @@ async function setupStaffDashboard() {
         let realtimeWorking = false;
 
         function showToast(text) {
-            let toast = document.getElementById("hll-live-toast");
-
-            if (!toast) {
-                toast = document.createElement("div");
-                toast.id = "hll-live-toast";
-                toast.setAttribute("role", "status");
-                toast.style.cssText =
-                    "position:fixed;right:20px;bottom:20px;z-index:9999;" +
-                    "padding:12px 16px;border-radius:12px;font-size:14px;" +
-                    "background:#14161d;color:#fff;border:1px solid rgba(228,71,82,.5);" +
-                    "box-shadow:0 12px 30px rgba(0,0,0,.5);transition:opacity .3s;";
-                document.body.appendChild(toast);
-            }
-
-            toast.textContent = text;
-            toast.style.opacity = "1";
-
-            clearTimeout(toast._hide);
-            toast._hide = setTimeout(() => { toast.style.opacity = "0"; }, 4000);
+            showLiveToast(text);
         }
 
         function refresh(message) {
@@ -6368,7 +6465,7 @@ async function setupStaffDashboard() {
             .from("level_submissions")
             .select("*")
             .eq("status", "pending")
-            .order("id", { ascending: true });
+            .order("id", { ascending: !newestFirst });
 
         if (error) throw error;
 
@@ -6389,14 +6486,34 @@ async function setupStaffDashboard() {
             const card = document.createElement("article");
             card.className = "staff-review-card";
 
+            const head = document.createElement("div");
+            head.className = "hll-dash-head";
+
             const title = document.createElement("h3");
             title.textContent = submission.name || "Untitled level";
 
-            const details = document.createElement("p");
-            details.textContent =
-                `Game Level ID: ${submission.level_id || "Not provided"} | ` +
-                `Creator: ${submission.creator || "Unknown"} | ` +
-                `List: ${submission.suggested_list || "Unknown"}`;
+            const stamp = document.createElement("span");
+            stamp.className = "hll-dash-time";
+            stamp.textContent = timeAgo(submission.created_at);
+            head.append(title, stamp);
+
+            const details = document.createElement("div");
+            details.className = "hll-dash-chips";
+
+            [
+                `GD ID: ${submission.level_id || "Not provided"}`,
+                `Creator: ${submission.creator || "Unknown"}`,
+                `${String(submission.suggested_list || "Unknown").toUpperCase()} list`
+            ].forEach(text => {
+                const chip = document.createElement("span");
+                chip.textContent = text;
+                details.appendChild(chip);
+            });
+
+            card.dataset.search = [
+                submission.name, submission.creator, submission.level_id,
+                submission.reason
+            ].join(" ").toLowerCase();
 
             const reason = document.createElement("p");
             reason.textContent =
@@ -6520,9 +6637,11 @@ async function setupStaffDashboard() {
             });
 
             actions.append(approveButton, rejectButton);
-            card.append(title, details, reason, actions);
+            card.append(head, details, reason, actions);
             levelQueue.appendChild(card);
         });
+
+        applyDashboardFilter();
     }
 
     async function loadCompletionSubmissionQueue() {
@@ -6530,7 +6649,7 @@ async function setupStaffDashboard() {
             .from("completion_submissions")
             .select("*")
             .eq("status", "pending")
-            .order("id", { ascending: true });
+            .order("id", { ascending: !newestFirst });
 
         if (error) throw error;
 
@@ -6547,22 +6666,60 @@ async function setupStaffDashboard() {
 
         completionQueue.innerHTML = "";
 
+        const levelIds = [...new Set(submissions.map(item => item.level_id).filter(Boolean))];
+        const userIds = [...new Set(submissions.map(item => item.submitted_by).filter(Boolean))];
+
+        const [levelLookup, userLookup] = await Promise.all([
+            levelIds.length
+                ? supabaseClient.from("levels").select("id, name, rank, list_type").in("id", levelIds)
+                : { data: [] },
+            userIds.length
+                ? supabaseClient.from("profiles").select("id, username").in("id", userIds)
+                : { data: [] }
+        ]);
+
+        const levelsById = new Map((levelLookup.data || []).map(item => [item.id, item]));
+        const usersById = new Map((userLookup.data || []).map(item => [item.id, item.username]));
+
         for (const submission of submissions) {
             const card = document.createElement("article");
             card.className = "staff-review-card";
 
+            const levelRow = levelsById.get(submission.level_id);
+            const siteName = usersById.get(submission.submitted_by) || "Unknown";
+
+            const head = document.createElement("div");
+            head.className = "hll-dash-head";
+
             const title = document.createElement("h3");
-            title.textContent = "Completion submission";
+            title.textContent = levelRow ? levelRow.name : "Unknown level";
 
-            const details = document.createElement("p");
-            details.textContent =
-                `Submission: ${submission.id} | ` +
-                `User: ${submission.submitted_by || "Unknown"} | ` +
-                `Level: ${submission.level_id || "Unknown"}`;
+            const stamp = document.createElement("span");
+            stamp.className = "hll-dash-time";
+            stamp.textContent = timeAgo(submission.created_at);
+            head.append(title, stamp);
 
-            const username = document.createElement("p");
-            username.textContent =
-                `GD Username: ${submission.gd_username || "Not provided"}`;
+            const details = document.createElement("div");
+            details.className = "hll-dash-chips";
+
+            [
+                `GD name: ${submission.gd_username || "Not provided"}`,
+                `Site user: ${siteName}`,
+                levelRow
+                    ? `${levelRow.list_type === "main" ? "Main" : "Extended"} #${levelRow.rank}`
+                    : "Level not on list"
+            ].forEach(text => {
+                const chip = document.createElement("span");
+                chip.textContent = text;
+                details.appendChild(chip);
+            });
+
+            card.dataset.search = [
+                levelRow && levelRow.name, siteName, submission.gd_username,
+                submission.notes
+            ].join(" ").toLowerCase();
+
+            const username = document.createElement("span");
 
             const notes = document.createElement("p");
             notes.textContent =
@@ -6605,10 +6762,10 @@ async function setupStaffDashboard() {
 
                     if (error) throw error;
 
-                    alert(
+                    showLiveToast(
                         decision === "approved"
-                            ? "Completion approved."
-                            : "Completion rejected."
+                            ? "Completion approved"
+                            : "Completion rejected"
                     );
 
                     await loadCompletionSubmissionQueue();
@@ -6634,9 +6791,11 @@ async function setupStaffDashboard() {
             });
 
             actions.append(approveButton, rejectButton);
-            card.append(title, details, username, notes, actions);
+            card.append(head, details, notes, actions);
             completionQueue.appendChild(card);
         }
+
+        applyDashboardFilter();
     }
 }
 
