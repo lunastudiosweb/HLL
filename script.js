@@ -1481,6 +1481,16 @@ function describeLog(log) {
                 `${target} to ${roleLabel(to)}`;
         }
 
+        case "ticket_resolved":
+        case "ticket_dismissed":
+            return `${log.action === "ticket_resolved" ? "resolved" : "dismissed"} ` +
+                `${String(d.kind || "ticket").replace("_", " ")} ${quoted}` +
+                (d.by ? ` from ${d.by}` : "") +
+                (d.note ? ` (${d.note})` : "");
+
+        case "account_deleted":
+            return `${target} deleted their account`;
+
         case "user_banned":
             return `banned ${target} ` +
                 (d.expires_at ? `until ${new Date(d.expires_at).toLocaleString()}` : "permanently") +
@@ -1901,7 +1911,8 @@ async function setupStaffMenu() {
     ensureStaffTabStyles();
 
     const entries = [
-        { label: "Staff Dashboard", sub: "Review submissions", href: "staff.html" }
+        { label: "Staff Dashboard", sub: "Review submissions", href: "staff.html" },
+        { label: "Moderation", sub: "Queues, reports, appeals and flags", hash: "moderation", onClick: openModerationPanel }
     ];
 
     if (info.is_owner) {
@@ -2096,6 +2107,7 @@ async function setupStaffMenu() {
     window.addEventListener("scroll", close, { passive: true });
     window.addEventListener("resize", close);
 
+    if (location.hash === "#moderation") openModerationPanel();
     if (isAdmin && location.hash === "#logs") openLogsPanel();
     if (isAdmin && location.hash === "#roles") openRolesPanel();
 }
@@ -2191,6 +2203,23 @@ async function showRestrictionNotice(form, kinds) {
         "margin:0 0 18px;padding:12px 14px;border:1px solid rgba(220,38,38,.4);" +
         "border-radius:10px;background:rgba(220,38,38,.1);color:#fecaca;font-size:14px;line-height:1.6;";
     notice.textContent = worst.reason ? `${text} Reason: ${worst.reason}` : text;
+
+    const appeal = document.createElement("button");
+    appeal.type = "button";
+    appeal.textContent = "Appeal this";
+    appeal.style.cssText =
+        "display:block;margin-top:10px;padding:8px 14px;border:1px solid rgba(255,255,255,.2);" +
+        "border-radius:9px;background:rgba(255,255,255,.06);color:#fff;font:inherit;font-size:13px;cursor:pointer;";
+    appeal.addEventListener("click", () => openTicketDialog({
+        kind: "appeal",
+        targetType: "restriction",
+        targetId: worst.kind,
+        targetName: worst.kind === "ban" ? "Ban appeal" : "Mute appeal",
+        title: worst.kind === "ban" ? "Appeal your ban" : "Appeal your mute",
+        intro: "Explain why this should be lifted. A staff member will review it.",
+        askEvidence: false
+    }));
+    notice.appendChild(appeal);
 
     form.insertAdjacentElement("beforebegin", notice);
 
@@ -2320,6 +2349,1148 @@ function restrictionTagText(item) {
     return item.kind === "ban"
         ? (item.expires_at ? "TEMP BANNED" : "BANNED")
         : "MUTED";
+}
+
+/* =========================================================
+   MODERATION DASHBOARD
+   ========================================================= */
+
+function ensureModerationStyles() {
+    if (document.getElementById("hll-mod-styles")) return;
+
+    const style = document.createElement("style");
+    style.id = "hll-mod-styles";
+    style.textContent = `
+        .hll-mod-overlay { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 14px; background: rgba(0,0,0,.72); }
+        .hll-mod-box { display: flex; flex-direction: column; width: min(1100px, 100%); height: min(92vh, 900px); border: 1px solid rgba(255,255,255,.12); border-radius: 18px; background: #0f1015; color: #f3f4f7; box-shadow: 0 30px 80px rgba(0,0,0,.65); overflow: hidden; }
+        .hll-mod-head { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,.08); }
+        .hll-mod-head h2 { margin: 0 auto 0 0; font-size: 20px; letter-spacing: -.02em; }
+        .hll-mod-head button, .hll-mod-bulk button, .hll-mod-actions button { padding: 8px 14px; border: 1px solid rgba(255,255,255,.14); border-radius: 9px; background: rgba(255,255,255,.05); color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
+        .hll-mod-head button:hover, .hll-mod-bulk button:hover:not(:disabled) { background: rgba(255,255,255,.1); }
+        .hll-mod-tabs { display: flex; gap: 4px; padding: 10px 14px 0; border-bottom: 1px solid rgba(255,255,255,.08); overflow-x: auto; scrollbar-width: none; }
+        .hll-mod-tab { flex: 0 0 auto; padding: 9px 13px; border: 0; border-bottom: 2px solid transparent; background: none; color: #a3a6b3; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+        .hll-mod-tab:hover { color: #fff; }
+        .hll-mod-tab.is-active { border-bottom-color: #e44752; color: #fff; }
+        .hll-mod-count { margin-left: 6px; padding: 1px 7px; border-radius: 999px; background: rgba(255,255,255,.09); font-size: 11px; }
+        .hll-mod-count.is-hot { background: rgba(228,71,82,.25); color: #ffb3b9; }
+        .hll-mod-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 20px; border-bottom: 1px solid rgba(255,255,255,.06); background: rgba(255,255,255,.02); font-size: 13px; color: #a3a6b3; }
+        .hll-mod-bulk[hidden] { display: none; }
+        .hll-mod-bulk .hll-mod-spacer { margin-right: auto; }
+        .hll-mod-bulk button:disabled { opacity: .4; cursor: not-allowed; }
+        .hll-mod-body { flex: 1; padding: 14px 20px 22px; overflow-y: auto; }
+        .hll-mod-empty { padding: 40px 10px; color: #8d909c; text-align: center; }
+        .hll-mod-card { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin-bottom: 10px; padding: 14px 16px; border: 1px solid rgba(255,255,255,.09); border-radius: 13px; background: linear-gradient(150deg, rgba(255,255,255,.035), transparent 60%), #14161d; }
+        .hll-mod-card.is-high { border-color: rgba(239,68,68,.4); }
+        .hll-mod-card input[type="checkbox"] { width: 17px; height: 17px; margin-top: 3px; accent-color: #e44752; cursor: pointer; }
+        .hll-mod-main { min-width: 0; }
+        .hll-mod-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-weight: 700; }
+        .hll-mod-title small { color: #737785; font-weight: 500; }
+        .hll-mod-title a { color: inherit; }
+        .hll-mod-title a:hover { text-decoration: underline; }
+        .hll-mod-meta { margin: 4px 0 0; color: #a3a6b3; font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+        .hll-mod-meta a { color: #7fb4ff; }
+        .hll-mod-flags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+        .hll-mod-flag { padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+        .hll-mod-flag.high { background: rgba(239,68,68,.18); color: #fca5a5; }
+        .hll-mod-flag.medium { background: rgba(245,158,11,.16); color: #fcd34d; }
+        .hll-mod-flag.low { background: rgba(255,255,255,.07); color: #b4b7c1; }
+        .hll-mod-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+        .hll-mod-actions .ok { border-color: transparent; background: #1f8f5f; color: #fff; font-weight: 600; }
+        .hll-mod-actions .no { border-color: rgba(255,255,255,.14); }
+        .hll-mod-actions .no:hover { background: #7f1d1d; }
+        .hll-mod-actions button:disabled { opacity: .5; cursor: not-allowed; }
+        .hll-mod-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+        .hll-mod-tools input, .hll-mod-tools select { min-height: 38px; padding: 0 12px; border: 1px solid rgba(255,255,255,.12); border-radius: 9px; background: #08090c; color: inherit; font: inherit; font-size: 13px; }
+        .hll-mod-tools input { flex: 1 1 220px; }
+        .hll-mod-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; padding: 10px 2px; border-bottom: 1px solid rgba(255,255,255,.06); font-size: 14px; }
+        .hll-mod-row small { color: #737785; white-space: nowrap; }
+        .hll-mod-row strong { color: #ff9aa2; }
+        @media (max-width: 600px) { .hll-mod-overlay { padding: 0; } .hll-mod-box { height: 100vh; border-radius: 0; } .hll-mod-head, .hll-mod-body { padding-left: 14px; padding-right: 14px; } }
+    `;
+    document.head.appendChild(style);
+}
+
+function normalizeEvidenceUrl(value) {
+    try {
+        const url = new URL(String(value).trim());
+        let host = url.hostname.replace(/^www\./, "").toLowerCase();
+        let path = url.pathname.replace(/\/+$/, "");
+        const keep = new URLSearchParams();
+
+        if (host === "youtu.be") {
+            keep.set("v", path.slice(1));
+            host = "youtube.com";
+            path = "/watch";
+        } else if (host.endsWith("youtube.com") && url.searchParams.get("v")) {
+            keep.set("v", url.searchParams.get("v"));
+            path = "/watch";
+        }
+
+        return `${host}${path}${keep.toString() ? `?${keep}` : ""}`;
+    } catch {
+        return String(value || "").trim().toLowerCase();
+    }
+}
+
+// Works out duplicate and suspicious-completion flags for the pending queues.
+function analyzeModerationData(data) {
+    const { levelSubs, compSubs, allCompSubs, levels, profiles, verified } = data;
+
+    const flags = new Map(); // key -> [{code,label,severity}]
+
+    const add = (key, code, label, severity) => {
+        const list = flags.get(key) || [];
+        list.push({ code, label, severity });
+        flags.set(key, list);
+    };
+
+    const levelByGdId = new Map();
+    const levelByName = new Map();
+
+    levels.forEach(level => {
+        if (level.level_id) levelByGdId.set(String(level.level_id).trim(), level);
+        levelByName.set(String(level.name || "").trim().toLowerCase(), level);
+    });
+
+    // --- Level suggestions ---
+    levelSubs.forEach(sub => {
+        const key = `l:${sub.id}`;
+        const gd = String(sub.level_id || "").trim();
+        const name = String(sub.name || "").trim().toLowerCase();
+
+        const onList = (gd && levelByGdId.get(gd)) || levelByName.get(name);
+
+        if (onList) {
+            add(key, "on_list",
+                `Already ranked: "${onList.name}" (#${onList.rank})`, "high");
+        }
+
+        const twin = levelSubs.find(other =>
+            other.id !== sub.id &&
+            ((gd && String(other.level_id || "").trim() === gd) ||
+             String(other.name || "").trim().toLowerCase() === name)
+        );
+
+        if (twin) add(key, "dup_pending", "Duplicate of another pending suggestion", "medium");
+
+        if (!gd) add(key, "no_id", "No GD level ID", "low");
+    });
+
+    // --- Completions ---
+    const levelById = new Map(levels.map(level => [level.id, level]));
+    const profileById = new Map(profiles.map(profile => [profile.id, profile]));
+
+    const evidenceOwners = new Map();
+
+    allCompSubs.forEach(sub => {
+        if (!sub.evidence_url) return;
+
+        const norm = normalizeEvidenceUrl(sub.evidence_url);
+        const list = evidenceOwners.get(norm) || [];
+        list.push(sub);
+        evidenceOwners.set(norm, list);
+    });
+
+    const verifiedSet = new Set(verified.map(row => `${row.user_id}:${row.level_id}`));
+    const verifiedCount = new Map();
+
+    verified.forEach(row => {
+        verifiedCount.set(row.user_id, (verifiedCount.get(row.user_id) || 0) + 1);
+    });
+
+    const hostOk = /(^|\.)(youtube\.com|youtu\.be|twitch\.tv|drive\.google\.com|streamable\.com|medal\.tv|vimeo\.com)$/;
+
+    compSubs.forEach(sub => {
+        const key = `c:${sub.id}`;
+        const level = levelById.get(sub.level_id);
+        const profile = profileById.get(sub.submitted_by);
+
+        if (verifiedSet.has(`${sub.submitted_by}:${sub.level_id}`)) {
+            add(key, "verified", "Already has a verified completion of this level", "high");
+        }
+
+        const dup = compSubs.find(other =>
+            other.id !== sub.id &&
+            other.submitted_by === sub.submitted_by &&
+            other.level_id === sub.level_id
+        );
+
+        if (dup) add(key, "dup_pending", "Duplicate pending submission for this level", "medium");
+
+        if (sub.evidence_url) {
+            const norm = normalizeEvidenceUrl(sub.evidence_url);
+            const others = (evidenceOwners.get(norm) || []).filter(other => other.id !== sub.id);
+
+            if (others.some(other => other.submitted_by !== sub.submitted_by)) {
+                add(key, "reused_other", "Same video used by a different player", "high");
+            } else if (others.length) {
+                add(key, "reused_self", "Same video used in another of their submissions", "medium");
+            }
+
+            try {
+                const host = new URL(sub.evidence_url).hostname.replace(/^www\./, "").toLowerCase();
+
+                if (!hostOk.test(host)) add(key, "host", `Unusual video host (${host})`, "low");
+            } catch { /* invalid URLs are caught at submit time */ }
+        }
+
+        if (sub.created_at) {
+            const when = new Date(sub.created_at).getTime();
+
+            const burst = allCompSubs.filter(other =>
+                other.submitted_by === sub.submitted_by &&
+                other.created_at &&
+                new Date(other.created_at).getTime() <= when &&
+                when - new Date(other.created_at).getTime() < 3600000
+            ).length;
+
+            if (burst >= 4) add(key, "rapid", `${burst} submissions within an hour`, "medium");
+        }
+
+        if (profile && profile.created_at && sub.created_at) {
+            const ageHours =
+                (new Date(sub.created_at) - new Date(profile.created_at)) / 3600000;
+
+            if (ageHours < 24 && level && Number(level.rank) <= 20 && level.list_type === "main") {
+                add(key, "new_account", "Brand-new account sending a top-20 level", "medium");
+            }
+        }
+
+        if (
+            level && level.list_type === "main" && Number(level.rank) <= 10 &&
+            !(verifiedCount.get(sub.submitted_by) > 0)
+        ) {
+            add(key, "first_top", "First-ever completion is a top-10 level", "medium");
+        }
+
+        if (
+            profile && profile.gd_username && sub.gd_username &&
+            profile.gd_username.trim().toLowerCase() !== sub.gd_username.trim().toLowerCase()
+        ) {
+            add(key, "gd_mismatch",
+                `GD name differs from profile ("${profile.gd_username}")`, "low");
+        }
+    });
+
+    return flags;
+}
+
+async function openModerationPanel() {
+    if (document.getElementById("hll-mod-panel")) return;
+
+    const info = await getStaffInfo();
+
+    if (!info) return;
+
+    ensureModerationStyles();
+
+    const canReview = staffCan(info, "review_completions");
+    const isAdmin = info.role === "admin";
+
+    const overlay = document.createElement("div");
+    overlay.id = "hll-mod-panel";
+    overlay.className = "hll-mod-overlay";
+
+    const box = document.createElement("div");
+    box.className = "hll-mod-box";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+
+    const head = document.createElement("div");
+    head.className = "hll-mod-head";
+    head.innerHTML = "<h2>Moderation</h2>";
+
+    const refreshButton = document.createElement("button");
+    refreshButton.type = "button";
+    refreshButton.textContent = "Refresh";
+
+    const closeButton = document.createElement("button");
+    closeButton.type = "button";
+    closeButton.textContent = "Close";
+
+    head.append(refreshButton, closeButton);
+
+    const tabsBar = document.createElement("div");
+    tabsBar.className = "hll-mod-tabs";
+    tabsBar.setAttribute("role", "tablist");
+
+    const bulkBar = document.createElement("div");
+    bulkBar.className = "hll-mod-bulk";
+
+    const body = document.createElement("div");
+    body.className = "hll-mod-body";
+
+    box.append(head, tabsBar, bulkBar, body);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    function onKey(event) {
+        if (event.key === "Escape") close();
+    }
+
+    function close() {
+        overlay.remove();
+        document.removeEventListener("keydown", onKey);
+
+        if (location.hash === "#moderation") clearUrlHash();
+    }
+
+    closeButton.addEventListener("click", close);
+    document.addEventListener("keydown", onKey);
+
+    overlay.addEventListener("click", event => {
+        if (event.target === overlay) close();
+    });
+
+    // ---------- State ----------
+    const state = {
+        tab: "levels",
+        data: null,
+        flags: new Map(),
+        tickets: [],
+        history: [],
+        selected: new Set(),
+        historySearch: "",
+        historyType: "all"
+    };
+
+    const TABS = [
+        { id: "levels", label: "Level submissions" },
+        { id: "completions", label: "Completions" },
+        { id: "flags", label: "Flags" },
+        { id: "level_report", label: "Level reports" },
+        { id: "player_report", label: "Player reports" },
+        { id: "appeal", label: "Appeals" },
+        { id: "rank_dispute", label: "Rank disputes" },
+        { id: "history", label: "Decision history" }
+    ];
+
+    const el = (tag, className, text) => {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+    };
+
+    function ago(value) {
+        if (!value) return "";
+
+        const seconds = Math.max(0, (Date.now() - new Date(value).getTime()) / 1000);
+
+        if (seconds < 60) return "just now";
+        if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+        if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+
+        return `${Math.floor(seconds / 86400)}d ago`;
+    }
+
+    const flaggedKeys = () => [...state.flags.entries()]
+        .filter(([, list]) => list.length)
+        .map(([key]) => key);
+
+    function ticketsOf(kind) {
+        return state.tickets.filter(ticket => ticket.kind === kind);
+    }
+
+    function counts() {
+        const d = state.data;
+
+        return {
+            levels: d ? d.levelSubs.length : 0,
+            completions: d ? d.compSubs.length : 0,
+            flags: flaggedKeys().length,
+            level_report: ticketsOf("level_report").length,
+            player_report: ticketsOf("player_report").length,
+            appeal: ticketsOf("appeal").length,
+            rank_dispute: ticketsOf("rank_dispute").length,
+            history: null
+        };
+    }
+
+    // ---------- Loading ----------
+    async function load() {
+        body.innerHTML = '<p class="hll-mod-empty">Loading...</p>';
+        state.selected.clear();
+
+        const [levelRes, compRes, allCompRes, levelsRes, ticketsRes, historyRes] = await Promise.all([
+            supabaseClient.from("level_submissions").select("*").eq("status", "pending").order("id", { ascending: true }),
+            supabaseClient.from("completion_submissions").select("*").eq("status", "pending").order("id", { ascending: true }),
+            supabaseClient.from("completion_submissions").select("id, submitted_by, level_id, evidence_url, created_at, status").order("id", { ascending: false }).limit(1000),
+            supabaseClient.from("levels").select("id, name, level_id, rank, list_type, creator").eq("status", "approved"),
+            supabaseClient.rpc("staff_list_tickets", { p_status: "open" }),
+            supabaseClient.rpc("staff_decision_history", { p_limit: 200 })
+        ]);
+
+        const levelSubs = levelRes.data || [];
+        const compSubs = compRes.data || [];
+
+        const userIds = [...new Set([
+            ...compSubs.map(sub => sub.submitted_by),
+            ...levelSubs.map(sub => sub.submitted_by),
+            ...(ticketsRes.data || []).map(ticket => ticket.created_by)
+        ].filter(Boolean))];
+
+        const [profilesRes, verifiedRes] = await Promise.all([
+            userIds.length
+                ? supabaseClient.from("profiles").select("id, username, gd_username, created_at").in("id", userIds)
+                : { data: [] },
+            userIds.length
+                ? supabaseClient.from("completions").select("user_id, level_id").in("user_id", userIds)
+                : { data: [] }
+        ]);
+
+        state.data = {
+            levelSubs,
+            compSubs,
+            allCompSubs: allCompRes.data || [],
+            levels: levelsRes.data || [],
+            profiles: profilesRes.data || [],
+            verified: verifiedRes.data || [],
+            error: levelRes.error || compRes.error || null
+        };
+
+        state.tickets = Array.isArray(ticketsRes.data) ? ticketsRes.data : [];
+        state.ticketsMissing = !!ticketsRes.error;
+        state.history = Array.isArray(historyRes.data) ? historyRes.data : [];
+        state.historyMissing = !!historyRes.error;
+        state.flags = analyzeModerationData(state.data);
+
+        render();
+    }
+
+    // ---------- Rendering ----------
+    function userName(id) {
+        const profile = state.data?.profiles.find(item => item.id === id);
+        return profile ? profile.username : "Unknown";
+    }
+
+    function renderTabs() {
+        const count = counts();
+
+        tabsBar.textContent = "";
+
+        TABS.forEach(tab => {
+            const button = el("button", `hll-mod-tab${state.tab === tab.id ? " is-active" : ""}`, tab.label);
+            button.type = "button";
+            button.setAttribute("role", "tab");
+
+            if (count[tab.id] !== null && count[tab.id] !== undefined) {
+                const badge = el("span", `hll-mod-count${count[tab.id] ? " is-hot" : ""}`, String(count[tab.id]));
+                button.appendChild(badge);
+            }
+
+            button.addEventListener("click", () => {
+                state.tab = tab.id;
+                state.selected.clear();
+                render();
+            });
+
+            tabsBar.appendChild(button);
+        });
+    }
+
+    function visibleKeys() {
+        const d = state.data;
+
+        switch (state.tab) {
+            case "levels": return d.levelSubs.map(sub => `l:${sub.id}`);
+            case "completions": return d.compSubs.map(sub => `c:${sub.id}`);
+            case "flags": return flaggedKeys();
+            case "level_report":
+            case "player_report":
+            case "appeal":
+            case "rank_dispute":
+                return ticketsOf(state.tab).map(ticket => `t:${ticket.id}`);
+            default: return [];
+        }
+    }
+
+    function renderBulk() {
+        bulkBar.textContent = "";
+
+        const keys = visibleKeys();
+
+        if (!keys.length || state.tab === "history") {
+            bulkBar.hidden = true;
+            return;
+        }
+
+        bulkBar.hidden = false;
+
+        const selectAll = el("button", "", "Select all");
+        selectAll.type = "button";
+        selectAll.addEventListener("click", () => {
+            keys.forEach(key => state.selected.add(key));
+            render();
+        });
+
+        const selectClean = el("button", "", "Select unflagged");
+        selectClean.type = "button";
+        selectClean.addEventListener("click", () => {
+            state.selected.clear();
+            keys.filter(key => !(state.flags.get(key) || []).length)
+                .forEach(key => state.selected.add(key));
+            render();
+        });
+
+        const clear = el("button", "", "Clear");
+        clear.type = "button";
+        clear.addEventListener("click", () => {
+            state.selected.clear();
+            render();
+        });
+
+        const label = el("span", "hll-mod-spacer", `${state.selected.size} selected`);
+
+        bulkBar.append(selectAll, selectClean, clear, label);
+
+        const chosen = [...state.selected];
+        const has = prefix => chosen.some(key => key.startsWith(prefix));
+
+        function bulkButton(text, className, enabled, handler) {
+            const button = el("button", className, text);
+            button.type = "button";
+            button.disabled = !enabled || !chosen.length;
+            button.addEventListener("click", handler);
+            bulkBar.appendChild(button);
+        }
+
+        if (["completions", "levels", "flags"].includes(state.tab)) {
+            bulkButton("Approve selected", "ok", canReview && !has("l:") && !has("t:"),
+                () => bulkReview("approved"));
+            bulkButton("Reject selected", "no", canReview,
+                () => bulkReview("rejected"));
+        } else {
+            bulkButton("Resolve selected", "ok", true, () => bulkTickets("resolved"));
+            bulkButton("Dismiss selected", "no", true, () => bulkTickets("dismissed"));
+        }
+    }
+
+    function checkbox(key) {
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = state.selected.has(key);
+        input.setAttribute("aria-label", "Select");
+        input.addEventListener("change", () => {
+            if (input.checked) state.selected.add(key);
+            else state.selected.delete(key);
+
+            renderBulk();
+        });
+        return input;
+    }
+
+    function flagsRow(key) {
+        const list = state.flags.get(key) || [];
+
+        if (!list.length) return null;
+
+        const row = el("div", "hll-mod-flags");
+
+        list.forEach(flag => row.appendChild(el("span", `hll-mod-flag ${flag.severity}`, flag.label)));
+
+        return row;
+    }
+
+    function cardShell(key) {
+        const list = state.flags.get(key) || [];
+        const card = el("article", `hll-mod-card${list.some(f => f.severity === "high") ? " is-high" : ""}`);
+        const main = el("div", "hll-mod-main");
+
+        card.append(checkbox(key), main);
+
+        return { card, main };
+    }
+
+    function actionButton(text, className, handler) {
+        const button = el("button", className, text);
+        button.type = "button";
+        button.addEventListener("click", async () => {
+            button.disabled = true;
+
+            try {
+                await handler();
+            } catch (error) {
+                alert(getErrorMessage(error));
+                button.disabled = false;
+            }
+        });
+        return button;
+    }
+
+    function levelSubCard(sub) {
+        const key = `l:${sub.id}`;
+        const { card, main } = cardShell(key);
+
+        const title = el("div", "hll-mod-title");
+        title.append(el("span", "", sub.name || "Untitled level"), el("small", "", ago(sub.created_at)));
+
+        main.append(
+            title,
+            el("p", "hll-mod-meta",
+                `GD ID ${sub.level_id || "n/a"} · by ${sub.creator || "unknown"} · ${String(sub.suggested_list || "?").toUpperCase()} list · suggested by ${userName(sub.submitted_by)}`),
+            el("p", "hll-mod-meta", `Reason: ${sub.reason || "none given"}`)
+        );
+
+        const flagRow = flagsRow(key);
+        if (flagRow) main.appendChild(flagRow);
+
+        const actions = el("div", "hll-mod-actions");
+
+        actions.append(
+            actionButton("Approve...", "ok", async () => {
+                let list = String(sub.suggested_list || "").toLowerCase();
+
+                if (list === "either") {
+                    list = (prompt('Submitter chose "either". Type "main" or "extended":') || "").trim().toLowerCase();
+                }
+
+                if (list !== "main" && list !== "extended") throw new Error("Choose main or extended.");
+
+                const rank = Number(prompt(list === "main"
+                    ? "Main List rank (1-150):"
+                    : "Extended List rank (151-350):"));
+
+                const valid = Number.isInteger(rank) &&
+                    (list === "main" ? rank >= 1 && rank <= 150 : rank >= 151 && rank <= 350);
+
+                if (!valid) throw new Error("That rank is outside the allowed range.");
+
+                if (!confirm(`Approve "${sub.name}" as ${list.toUpperCase()} #${rank}?`)) {
+                    return render();
+                }
+
+                if (String(sub.suggested_list).toLowerCase() === "either") {
+                    const { error } = await supabaseClient
+                        .from("level_submissions").update({ suggested_list: list }).eq("id", sub.id);
+                    if (error) throw error;
+                }
+
+                const { error } = await supabaseClient.rpc("review_level_submission", {
+                    p_submission_id: sub.id, p_decision: "approved", p_rank: rank
+                });
+
+                if (error) throw error;
+
+                await load();
+            }),
+            actionButton("Reject", "no", async () => {
+                if (!confirm(`Reject "${sub.name}"?`)) return render();
+
+                const { error } = await supabaseClient.rpc("review_level_submission", {
+                    p_submission_id: sub.id, p_decision: "rejected", p_rank: null
+                });
+
+                if (error) throw error;
+
+                await load();
+            })
+        );
+
+        if (!canReview) actions.querySelectorAll("button").forEach(button => { button.disabled = true; });
+
+        main.appendChild(actions);
+
+        return card;
+    }
+
+    function completionCard(sub) {
+        const key = `c:${sub.id}`;
+        const { card, main } = cardShell(key);
+        const level = state.data.levels.find(item => item.id === sub.level_id);
+
+        const title = el("div", "hll-mod-title");
+
+        if (level) {
+            const link = el("a", "", level.name);
+            link.href = `level.html?id=${encodeURIComponent(level.id)}`;
+            link.target = "_blank";
+            link.rel = "noopener";
+            title.appendChild(link);
+        } else {
+            title.appendChild(el("span", "", "Unknown level"));
+        }
+
+        title.appendChild(el("small", "", `${level ? `#${level.rank} ` : ""}${ago(sub.created_at)}`));
+
+        const meta = el("p", "hll-mod-meta");
+        meta.append(`${userName(sub.submitted_by)} (GD: ${sub.gd_username || "n/a"}) · `);
+
+        if (sub.evidence_url && validHttpUrl(sub.evidence_url)) {
+            const link = el("a", "", "view evidence");
+            link.href = sub.evidence_url;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            meta.appendChild(link);
+        } else {
+            meta.append("no evidence link");
+        }
+
+        main.append(title, meta);
+
+        if (sub.notes) main.appendChild(el("p", "hll-mod-meta", `Notes: ${sub.notes}`));
+
+        const flagRow = flagsRow(key);
+        if (flagRow) main.appendChild(flagRow);
+
+        const actions = el("div", "hll-mod-actions");
+
+        const decide = decision => async () => {
+            const { error } = await supabaseClient.rpc("review_completion_submission", {
+                p_submission_id: sub.id, p_decision: decision
+            });
+
+            if (error) throw error;
+
+            await load();
+        };
+
+        actions.append(
+            actionButton("Approve", "ok", decide("approved")),
+            actionButton("Reject", "no", decide("rejected"))
+        );
+
+        if (!canReview) actions.querySelectorAll("button").forEach(button => { button.disabled = true; });
+
+        main.appendChild(actions);
+
+        return card;
+    }
+
+    const TICKET_LABELS = {
+        level_report: "Level report",
+        player_report: "Player report",
+        appeal: "Appeal",
+        rank_dispute: "Rank dispute"
+    };
+
+    function ticketCard(ticket) {
+        const key = `t:${ticket.id}`;
+        const { card, main } = cardShell(key);
+
+        const title = el("div", "hll-mod-title");
+        let target;
+
+        if (ticket.target_type === "level" && ticket.target_id) {
+            target = el("a", "", ticket.target_name || "Level");
+            target.href = `level.html?id=${encodeURIComponent(ticket.target_id)}`;
+            target.target = "_blank";
+            target.rel = "noopener";
+        } else if (ticket.target_type === "player" && ticket.target_id) {
+            target = el("a", "", ticket.target_name || "Player");
+            target.href = `profile.html?id=${encodeURIComponent(ticket.target_id)}`;
+            target.target = "_blank";
+            target.rel = "noopener";
+        } else {
+            target = el("span", "",
+                ticket.target_type === "restriction"
+                    ? `Appeal of a ${ticket.target_id || "restriction"}`
+                    : (ticket.target_name || TICKET_LABELS[ticket.kind]));
+        }
+
+        title.append(target, el("small", "", `${TICKET_LABELS[ticket.kind]} · from ${ticket.created_by_name || "unknown"} · ${ago(ticket.created_at)}`));
+
+        main.append(title, el("p", "hll-mod-meta", ticket.reason));
+
+        if (ticket.kind === "rank_dispute") {
+            const level = state.data.levels.find(item => item.id === ticket.target_id);
+
+            main.appendChild(el("p", "hll-mod-meta",
+                `Currently ${level ? `#${level.rank}` : "unranked"} · suggested #${ticket.suggested_rank}`));
+        }
+
+        if (ticket.evidence_url && validHttpUrl(ticket.evidence_url)) {
+            const meta = el("p", "hll-mod-meta");
+            const link = el("a", "", "Evidence link");
+            link.href = ticket.evidence_url;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            meta.appendChild(link);
+            main.appendChild(meta);
+        }
+
+        const actions = el("div", "hll-mod-actions");
+
+        const resolve = decision => async () => {
+            const note = prompt(
+                decision === "resolved"
+                    ? "Note for the record (optional):"
+                    : "Why is this dismissed? (optional):", ""
+            );
+
+            if (note === null) return render();
+
+            const { error } = await supabaseClient.rpc("staff_resolve_ticket", {
+                p_id: ticket.id, p_decision: decision, p_note: note
+            });
+
+            if (error) throw error;
+
+            await load();
+        };
+
+        if (isAdmin && ticket.kind === "appeal" && ticket.target_type === "restriction") {
+            const kind = ticket.target_id === "mute" ? "mute" : "ban";
+
+            actions.appendChild(actionButton(`Lift ${kind} and resolve`, "ok", async () => {
+                if (!confirm(`Lift ${ticket.created_by_name}'s ${kind}?`)) return render();
+
+                if (!(await liftUserRestriction(ticket.created_by, kind))) return;
+
+                const { error } = await supabaseClient.rpc("staff_resolve_ticket", {
+                    p_id: ticket.id, p_decision: "resolved", p_note: `${kind} lifted`
+                });
+
+                if (error) throw error;
+
+                await load();
+            }));
+        }
+
+        actions.append(
+            actionButton("Resolve", "ok", resolve("resolved")),
+            actionButton("Dismiss", "no", resolve("dismissed"))
+        );
+
+        main.appendChild(actions);
+
+        return card;
+    }
+
+    function empty(text) {
+        body.appendChild(el("p", "hll-mod-empty", text));
+    }
+
+    function renderHistory() {
+        const tools = el("div", "hll-mod-tools");
+
+        const search = el("input");
+        search.type = "search";
+        search.placeholder = "Search by staff member or target";
+        search.value = state.historySearch;
+
+        const type = el("select");
+
+        [
+            ["all", "All decisions"],
+            ["completion", "Completions"],
+            ["level", "Levels"],
+            ["ticket", "Tickets"],
+            ["user", "Bans and mutes"]
+        ].forEach(([value, text]) => {
+            const option = el("option", "", text);
+            option.value = value;
+            type.appendChild(option);
+        });
+
+        type.value = state.historyType;
+
+        tools.append(search, type);
+        body.appendChild(tools);
+
+        const list = el("div");
+        body.appendChild(list);
+
+        function paint() {
+            list.textContent = "";
+
+            const term = state.historySearch.trim().toLowerCase();
+
+            const rows = state.history.filter(row => {
+                if (state.historyType !== "all" && !String(row.action).startsWith(state.historyType) &&
+                    !(state.historyType === "user" && /^(user_|restriction)/.test(row.action))) {
+                    return false;
+                }
+
+                return !term ||
+                    String(row.actor_name || "").toLowerCase().includes(term) ||
+                    String(row.target_name || "").toLowerCase().includes(term);
+            });
+
+            if (!rows.length) {
+                list.appendChild(el("p", "hll-mod-empty",
+                    state.historyMissing
+                        ? "Decision history is not installed in the database yet. Run the moderation SQL first."
+                        : "No decisions found."));
+                return;
+            }
+
+            rows.forEach(row => {
+                const line = el("div", "hll-mod-row");
+                const text = el("span");
+
+                text.append(el("strong", "", row.actor_name || "System"), ` ${describeLog(row)}`);
+
+                const time = el("small", "", new Date(row.created_at).toLocaleString());
+
+                line.append(text, time);
+                list.appendChild(line);
+            });
+        }
+
+        search.addEventListener("input", () => { state.historySearch = search.value; paint(); });
+        type.addEventListener("change", () => { state.historyType = type.value; paint(); });
+
+        paint();
+    }
+
+    function render() {
+        renderTabs();
+        renderBulk();
+
+        body.textContent = "";
+
+        const d = state.data;
+
+        if (!d) return;
+
+        if (d.error) {
+            empty(`Could not load submissions: ${getErrorMessage(d.error)}`);
+            return;
+        }
+
+        switch (state.tab) {
+            case "levels":
+                if (!d.levelSubs.length) return empty("No pending level submissions.");
+                d.levelSubs.forEach(sub => body.appendChild(levelSubCard(sub)));
+                break;
+
+            case "completions":
+                if (!d.compSubs.length) return empty("No pending completions.");
+                d.compSubs.forEach(sub => body.appendChild(completionCard(sub)));
+                break;
+
+            case "flags": {
+                const keys = flaggedKeys();
+
+                if (!keys.length) return empty("Nothing suspicious right now.");
+
+                // Highest severity first
+                const rank = key => {
+                    const list = state.flags.get(key) || [];
+                    return list.some(f => f.severity === "high") ? 0 :
+                        list.some(f => f.severity === "medium") ? 1 : 2;
+                };
+
+                keys.sort((a, b) => rank(a) - rank(b)).forEach(key => {
+                    const id = key.slice(2);
+
+                    if (key.startsWith("l:")) {
+                        const sub = d.levelSubs.find(item => String(item.id) === id);
+                        if (sub) body.appendChild(levelSubCard(sub));
+                    } else {
+                        const sub = d.compSubs.find(item => String(item.id) === id);
+                        if (sub) body.appendChild(completionCard(sub));
+                    }
+                });
+                break;
+            }
+
+            case "history":
+                renderHistory();
+                break;
+
+            default: {
+                const list = ticketsOf(state.tab);
+
+                if (state.ticketsMissing) {
+                    return empty("Reports and appeals are not installed in the database yet. Run the moderation SQL first.");
+                }
+
+                if (!list.length) return empty("Nothing open here.");
+
+                list.forEach(ticket => body.appendChild(ticketCard(ticket)));
+            }
+        }
+    }
+
+    // ---------- Bulk actions ----------
+    async function runBulk(items, worker, verb) {
+        const failures = [];
+        let done = 0;
+
+        for (const item of items) {
+            bulkBar.querySelector(".hll-mod-spacer").textContent =
+                `${verb} ${done + 1} of ${items.length}...`;
+
+            bulkBar.querySelectorAll("button").forEach(button => { button.disabled = true; });
+
+            try {
+                await worker(item);
+                done += 1;
+            } catch (error) {
+                failures.push(getErrorMessage(error));
+            }
+        }
+
+        await load();
+
+        if (failures.length) {
+            alert(`${done} done, ${failures.length} failed.\n\nFirst problem: ${failures[0]}`);
+        }
+    }
+
+    async function bulkReview(decision) {
+        const keys = [...state.selected];
+        const flagged = keys.filter(key => (state.flags.get(key) || []).some(f => f.severity === "high"));
+
+        let message = `${decision === "approved" ? "Approve" : "Reject"} ${keys.length} submission${keys.length === 1 ? "" : "s"}?`;
+
+        if (decision === "approved" && flagged.length) {
+            message += `\n\n${flagged.length} of them have serious flags. Approving anyway is not recommended.`;
+        }
+
+        if (!confirm(message)) return;
+
+        await runBulk(keys, async key => {
+            const id = key.slice(2);
+
+            const result = key.startsWith("l:")
+                ? await supabaseClient.rpc("review_level_submission", {
+                    p_submission_id: id, p_decision: "rejected", p_rank: null
+                })
+                : await supabaseClient.rpc("review_completion_submission", {
+                    p_submission_id: id, p_decision: decision
+                });
+
+            if (result.error) throw result.error;
+        }, decision === "approved" ? "Approving" : "Rejecting");
+    }
+
+    async function bulkTickets(decision) {
+        const keys = [...state.selected];
+        const note = prompt(
+            `${decision === "resolved" ? "Resolve" : "Dismiss"} ${keys.length} ticket${keys.length === 1 ? "" : "s"}.\nNote for all (optional):`,
+            ""
+        );
+
+        if (note === null) return;
+
+        await runBulk(keys, async key => {
+            const { error } = await supabaseClient.rpc("staff_resolve_ticket", {
+                p_id: Number(key.slice(2)), p_decision: decision, p_note: note
+            });
+
+            if (error) throw error;
+        }, decision === "resolved" ? "Resolving" : "Dismissing");
+    }
+
+    refreshButton.addEventListener("click", load);
+
+    await load();
+}
+
+// Small "Report" / "Dispute" / "Appeal" form any signed-in player can open.
+function openTicketDialog({ kind, targetType, targetId, targetName, title, intro, askRank, askEvidence, currentRank }) {
+    if (!currentUser) {
+        location.href = "login.html";
+        return;
+    }
+
+    if (document.getElementById("hll-ticket-dialog")) return;
+
+    const overlay = document.createElement("div");
+    overlay.id = "hll-ticket-dialog";
+    overlay.style.cssText =
+        "position:fixed;inset:0;z-index:10000;display:flex;align-items:center;" +
+        "justify-content:center;padding:16px;background:rgba(0,0,0,.75);";
+
+    const box = document.createElement("form");
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+    box.style.cssText =
+        "display:grid;gap:12px;width:min(480px,100%);padding:24px;" +
+        "border:1px solid rgba(255,255,255,.14);border-radius:16px;background:#14161d;" +
+        "color:#f3f4f7;box-shadow:0 24px 60px rgba(0,0,0,.6);font:inherit;";
+
+    const fieldCss =
+        "width:100%;padding:11px 13px;border:1px solid rgba(255,255,255,.14);" +
+        "border-radius:10px;background:#08090c;color:inherit;font:inherit;";
+
+    box.innerHTML = `
+        <h3 style="margin:0;font-size:20px">${escapeHTML(title)}</h3>
+        <p style="margin:0;color:#a3a6b3;font-size:14px;line-height:1.6">${escapeHTML(intro || "")}</p>
+        ${askRank ? `
+            <label style="font-size:14px;font-weight:600">Rank you think it should have${currentRank ? ` (now #${escapeHTML(currentRank)})` : ""}
+                <input name="rank" type="number" min="1" max="350" required style="${fieldCss};margin-top:6px">
+            </label>` : ""}
+        <label style="font-size:14px;font-weight:600">What happened?
+            <textarea name="reason" rows="5" maxlength="1000" required
+                placeholder="Be specific so staff can act on it (at least 10 characters)"
+                style="${fieldCss};margin-top:6px;resize:vertical"></textarea>
+        </label>
+        ${askEvidence ? `
+            <label style="font-size:14px;font-weight:600">Link to proof (optional)
+                <input name="evidence" type="url" placeholder="https://" style="${fieldCss};margin-top:6px">
+            </label>` : ""}
+        <p id="hll-ticket-msg" role="status" style="min-height:20px;margin:0;font-size:13px"></p>
+        <div style="display:flex;justify-content:flex-end;gap:10px">
+            <button type="button" data-cancel style="padding:10px 16px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:rgba(255,255,255,.05);color:inherit;font:inherit;cursor:pointer">Cancel</button>
+            <button type="submit" style="padding:10px 16px;border:0;border-radius:10px;background:#e44752;color:#fff;font:inherit;font-weight:600;cursor:pointer">Send</button>
+        </div>
+    `;
+
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    const message = box.querySelector("#hll-ticket-msg");
+    const send = box.querySelector('[type="submit"]');
+
+    function onKey(event) {
+        if (event.key === "Escape") close();
+    }
+
+    function close() {
+        overlay.remove();
+        document.removeEventListener("keydown", onKey);
+    }
+
+    document.addEventListener("keydown", onKey);
+    box.querySelector("[data-cancel]").addEventListener("click", close);
+    overlay.addEventListener("click", event => {
+        if (event.target === overlay) close();
+    });
+
+    box.addEventListener("submit", async event => {
+        event.preventDefault();
+
+        const evidence = box.elements.evidence?.value.trim() || "";
+
+        if (evidence && !validHttpUrl(evidence)) {
+            message.style.color = "#fca5a5";
+            message.textContent = "Proof must be a link starting with https://";
+            return;
+        }
+
+        send.disabled = true;
+        message.style.color = "#a3a6b3";
+        message.textContent = "Sending...";
+
+        const { error } = await supabaseClient.rpc("submit_ticket", {
+            p_kind: kind,
+            p_target_type: targetType,
+            p_target_id: String(targetId),
+            p_target_name: targetName || null,
+            p_reason: box.elements.reason.value,
+            p_suggested_rank: askRank ? Number(box.elements.rank.value) : null,
+            p_evidence_url: evidence || null
+        });
+
+        if (error) {
+            send.disabled = false;
+            message.style.color = "#fca5a5";
+            message.textContent = /submit_ticket|function|schema cache/i.test(error.message || "")
+                ? "Reports are not set up yet. Please try again later."
+                : getErrorMessage(error);
+            return;
+        }
+
+        message.style.color = "#86efac";
+        message.textContent = "Sent. Staff will review it. Thank you!";
+        setTimeout(close, 1400);
+    });
+
+    box.elements.reason.focus();
 }
 
 async function openRolesPanel() {
@@ -5383,10 +6554,27 @@ async function loadMyCompletionSubmissions(container, userId, levelsById) {
                     <strong>${escapeHTML(level ? level.name : "Unknown level")}</strong>
                     <small>${escapeHTML(when)}</small>
                 </span>
-                <span class="hll-comp-status ${status}">${status}</span>
+                <span>
+                    ${status === "rejected"
+                        ? `<button type="button" data-appeal="${escapeHTML(item.id)}" data-level="${escapeHTML(level ? level.name : "")}" style="margin-right:8px;padding:3px 10px;border:1px solid rgba(255,255,255,.2);border-radius:999px;background:none;color:#c4c7d0;font:inherit;font-size:12px;cursor:pointer">Appeal</button>`
+                        : ""}
+                    <span class="hll-comp-status ${status}">${status}</span>
+                </span>
             </div>
         `;
     }).join("");
+
+    container.querySelectorAll("[data-appeal]").forEach(button => {
+        button.addEventListener("click", () => openTicketDialog({
+            kind: "appeal",
+            targetType: "completion_submission",
+            targetId: button.dataset.appeal,
+            targetName: button.dataset.level || "Completion",
+            title: `Appeal your rejected ${button.dataset.level || ""} completion`,
+            intro: "If you think this was rejected by mistake, explain why and add better proof if you have it.",
+            askEvidence: true
+        }));
+    });
 
     return data;
 }
@@ -6517,6 +7705,27 @@ async function renderProfile() {
         }
     }
 
+    document.getElementById("hll-profile-report")?.remove();
+
+    if (currentUser && currentUser.id !== profile.id) {
+        const report = document.createElement("button");
+        report.id = "hll-profile-report";
+        report.type = "button";
+        report.className = "button button-secondary";
+        report.style.margin = "10px 0";
+        report.textContent = "Report player";
+        report.addEventListener("click", () => openTicketDialog({
+            kind: "player_report",
+            targetType: "player",
+            targetId: profile.id,
+            targetName: profile.username,
+            title: `Report ${profile.username || "this player"}`,
+            intro: "Report cheating, fake evidence, harassment or other rule-breaking. Staff will look into it.",
+            askEvidence: true
+        }));
+        heading.insertAdjacentElement("afterend", report);
+    }
+
     renderProfileBanner(
         profile,
         heading.closest("section") || heading.parentElement
@@ -6658,6 +7867,49 @@ async function renderLevelDetail() {
     }
 
     title.textContent = level.name || "Unnamed level";
+
+    document.getElementById("hll-level-tools")?.remove();
+
+    const levelTools = document.createElement("div");
+    levelTools.id = "hll-level-tools";
+    levelTools.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;margin:12px 0;";
+
+    [
+        {
+            text: "Report level",
+            options: {
+                kind: "level_report",
+                title: `Report "${level.name}"`,
+                intro: "Tell staff about a problem, such as a wrong creator, a broken or copied level, or something that doesn't belong on the list.",
+                askEvidence: true
+            }
+        },
+        {
+            text: "Dispute rank",
+            options: {
+                kind: "rank_dispute",
+                title: `Dispute the rank of "${level.name}"`,
+                intro: "Think this level is placed too high or too low? Say where it should go and why.",
+                askRank: true,
+                askEvidence: true,
+                currentRank: level.rank
+            }
+        }
+    ].forEach(item => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "button button-secondary";
+        button.textContent = item.text;
+        button.addEventListener("click", () => openTicketDialog({
+            ...item.options,
+            targetType: "level",
+            targetId: level.id,
+            targetName: level.name
+        }));
+        levelTools.appendChild(button);
+    });
+
+    title.insertAdjacentElement("afterend", levelTools);
 
     if ($("level-list-type")) {
         $("level-list-type").textContent =
