@@ -13,6 +13,10 @@
             box-sizing: border-box;
         }
 
+        html {
+            scroll-behavior: smooth;
+        }
+
         body {
             margin: 0;
             min-height: 100vh;
@@ -21,32 +25,90 @@
             font-family: Arial, Helvetica, sans-serif;
         }
 
-        #hll-application-root {
-            width: min(1000px, calc(100% - 32px));
-            margin: 55px auto;
-            color: #f4f4f5;
+        /* Back button */
+
+        .hll-back-button {
+            position: fixed;
+            top: 24px;
+            left: 28px;
+            z-index: 9999;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 11px 17px;
+            border-radius: 10px;
+            background: #14161c;
+            border: 1px solid #292d37;
+            color: #e4e4e7;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 700;
+            transition: .2s ease;
         }
 
+        .hll-back-button span {
+            font-size: 20px;
+            transition: transform .2s ease;
+        }
+
+        .hll-back-button:hover {
+            background: #20242e;
+            border-color: #668fff;
+            transform: translateX(-3px);
+        }
+
+        .hll-back-button:hover span {
+            transform: translateX(-3px);
+        }
+
+        /* Application container */
+
+        #hll-application-root {
+            width: min(1000px, calc(100% - 36px));
+            margin: 100px auto 55px;
+            color: #f4f4f5;
+            animation: hll-enter .4s ease;
+        }
+
+        @keyframes hll-enter {
+            from {
+                opacity: 0;
+                transform: translateY(12px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Typography */
+
         #hll-application-root h1 {
-            font-size: clamp(30px, 5vw, 44px);
+            font-size: clamp(30px, 5vw, 46px);
             font-weight: 800;
             letter-spacing: -1.5px;
+            color: #fff;
             margin-bottom: 12px;
         }
 
         #hll-application-root h2 {
             font-size: 23px;
+            font-weight: 750;
+            color: #fff;
             margin: 28px 0 16px;
         }
 
         #hll-application-root h3 {
             font-size: 18px;
+            color: #e5e7eb;
         }
 
         #hll-application-root p {
             color: #a1a1aa;
-            line-height: 1.7;
+            line-height: 1.75;
         }
+
+        /* Cards and sections */
 
         #hll-application-root form,
         #hll-application-root section,
@@ -57,9 +119,18 @@
             background: #111318;
             border: 1px solid #292d37;
             border-radius: 14px;
-            padding: 24px;
-            margin-bottom: 20px;
+            padding: 25px;
+            margin-bottom: 22px;
+            transition: border-color .2s ease;
         }
+
+        #hll-application-root form:hover,
+        #hll-application-root section:hover,
+        #hll-application-root article:hover {
+            border-color: #3b465b;
+        }
+
+        /* Labels */
 
         #hll-application-root label {
             display: block;
@@ -69,12 +140,14 @@
             margin: 18px 0 9px;
         }
 
+        /* Inputs */
+
         #hll-application-root input,
         #hll-application-root textarea,
         #hll-application-root select {
             display: block;
             width: 100%;
-            padding: 14px;
+            padding: 14px 15px;
             margin: 8px 0 20px;
             background: #090b10;
             color: #fff;
@@ -82,6 +155,7 @@
             border-radius: 9px;
             font: inherit;
             outline: none;
+            transition: border-color .2s, box-shadow .2s;
         }
 
         #hll-application-root textarea {
@@ -95,6 +169,13 @@
             border-color: #668fff;
             box-shadow: 0 0 0 3px #668fff20;
         }
+
+        #hll-application-root input::placeholder,
+        #hll-application-root textarea::placeholder {
+            color: #666b78;
+        }
+
+        /* Buttons */
 
         #hll-application-root button {
             padding: 12px 20px;
@@ -119,9 +200,17 @@
             border-color: #426fe8;
         }
 
-        #hll-application-root a {
-            color: #82a5ff;
+        #hll-application-root button[type="submit"]:hover {
+            background: #5682ff;
         }
+
+        #hll-application-root button:disabled {
+            opacity: .5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Status messages */
 
         #hll-application-root [data-type="success"] {
             color: #62dda1 !important;
@@ -131,15 +220,28 @@
             color: #ff777f !important;
         }
 
-        #hll-application-root button:disabled {
-            opacity: .5;
-            cursor: not-allowed;
+        /* Links */
+
+        #hll-application-root a {
+            color: #82a5ff;
+            text-decoration: none;
         }
 
+        #hll-application-root a:hover {
+            text-decoration: underline;
+        }
+
+        /* Mobile */
+
         @media (max-width: 650px) {
+            .hll-back-button {
+                top: 14px;
+                left: 12px;
+            }
+
             #hll-application-root {
                 width: calc(100% - 22px);
-                margin: 28px auto;
+                margin-top: 85px;
             }
 
             #hll-application-root form,
@@ -147,11 +249,34 @@
             #hll-application-root article {
                 padding: 17px;
             }
+
+            #hll-application-root h1 {
+                font-size: 30px;
+            }
+
+            #hll-application-root button {
+                max-width: 100%;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                animation-duration: .01ms !important;
+                transition-duration: .01ms !important;
+                scroll-behavior: auto !important;
+            }
         }
     </style>
 </head>
 
 <body>
+
+    <a href="index.html" class="hll-back-button">
+        <span>←</span>
+        Back to HLL
+    </a>
 
     <main id="hll-application-root"></main>
 
