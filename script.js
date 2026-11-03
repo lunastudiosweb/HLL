@@ -4831,6 +4831,93 @@ function setupLevelSubmission() {
 
     form.dataset.hllBound = "true";
 
+    // ---- Live hints: level ID, duplicates, character counter ----
+    const idInput = $("level-id");
+    const nameInput = $("level-name");
+    const reasonInput = $("submission-reason");
+
+    function addHint(input) {
+        if (!input) return null;
+
+        let hint = input.parentElement.querySelector(".field-hint");
+
+        if (!hint) {
+            hint = document.createElement("p");
+            hint.className = "field-hint";
+            input.insertAdjacentElement("afterend", hint);
+        }
+
+        return hint;
+    }
+
+    const idHint = addHint(idInput);
+    const idDefault = idHint ? idHint.textContent : "";
+    const reasonHint = addHint(reasonInput);
+
+    let duplicateOnList = null;
+    let duplicateTimer = null;
+
+    function paintIdHint(text, kind) {
+        if (!idHint) return;
+        idHint.textContent = text;
+        idHint.className = `field-hint${kind ? ` is-${kind}` : ""}`;
+    }
+
+    async function checkDuplicate() {
+        const raw = (idInput?.value || "").trim();
+
+        duplicateOnList = null;
+
+        if (!raw) return paintIdHint(idDefault, "");
+
+        if (!/^\d+$/.test(raw)) {
+            return paintIdHint("The level ID should only contain numbers.", "error");
+        }
+
+        try {
+            const { data } = await supabaseClient
+                .from("levels")
+                .select("name, rank, list_type, status")
+                .eq("level_id", raw)
+                .eq("status", "approved")
+                .limit(1);
+
+            if (data && data.length) {
+                duplicateOnList = data[0];
+                return paintIdHint(
+                    `This level is already on the ${data[0].list_type === "main" ? "Main" : "Extended"} List as "${data[0].name}" (#${data[0].rank}).`,
+                    "warn"
+                );
+            }
+
+            paintIdHint("ID looks good, and the level isn't on the lists yet.", "ok");
+        } catch {
+            paintIdHint(idDefault, "");
+        }
+    }
+
+    idInput?.addEventListener("input", () => {
+        clearTimeout(duplicateTimer);
+        duplicateTimer = setTimeout(checkDuplicate, 400);
+    });
+
+    if (reasonInput && reasonHint) {
+        const count = () => {
+            reasonHint.textContent = `${reasonInput.value.length}/2000`;
+        };
+
+        reasonInput.addEventListener("input", count);
+        form.addEventListener("reset", () => setTimeout(() => {
+            count();
+            paintIdHint(idDefault, "");
+        }, 0));
+        count();
+    }
+
+    nameInput?.addEventListener("blur", () => {
+        nameInput.value = nameInput.value.trim();
+    });
+
     form.addEventListener("submit", async event => {
         event.preventDefault();
 
@@ -4841,6 +4928,15 @@ function setupLevelSubmission() {
 
         const user = await requireLogin();
         if (!user) return;
+
+        if (duplicateOnList) {
+            showMessage(
+                message,
+                `"${duplicateOnList.name}" is already ranked at #${duplicateOnList.rank}, so it can't be suggested again.`,
+                "error"
+            );
+            return;
+        }
 
         const name = field("level-name")?.value.trim();
         const levelId = field("level-id")?.value.trim() || "";
@@ -4882,7 +4978,7 @@ function setupLevelSubmission() {
 
             showMessage(
                 message,
-                "Level suggestion submitted! It is waiting for staff review.",
+                "Level suggestion submitted! Staff have been notified and will review it soon.",
                 "success"
             );
         } catch (error) {
@@ -7077,9 +7173,22 @@ async function setupStaffDashboard() {
             rejectButton.className = "staff-reject-button";
 
             approveButton.addEventListener("click", async () => {
-                const list = String(submission.suggested_list || "")
+                let list = String(submission.suggested_list || "")
                     .trim()
                     .toLowerCase();
+
+                if (list === "either") {
+                    const chosen = (prompt(
+                        'The submitter chose "either list". Type "main" or "extended":'
+                    ) || "").trim().toLowerCase();
+
+                    if (chosen !== "main" && chosen !== "extended") {
+                        if (chosen) alert('Please type exactly "main" or "extended".');
+                        return;
+                    }
+
+                    list = chosen;
+                }
 
                 if (list !== "main" && list !== "extended") {
                     alert("This submission has an invalid list type.");
@@ -7118,6 +7227,16 @@ async function setupStaffDashboard() {
                 approveButton.textContent = "Approving...";
 
                 try {
+                    // "Either list" submissions: record the list staff picked first.
+                    if (String(submission.suggested_list || "").toLowerCase() === "either") {
+                        const { error: listError } = await supabaseClient
+                            .from("level_submissions")
+                            .update({ suggested_list: list })
+                            .eq("id", submission.id);
+
+                        if (listError) throw listError;
+                    }
+
                     const { data, error } = await supabaseClient.rpc(
                         "review_level_submission",
                         {
