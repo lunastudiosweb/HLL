@@ -3503,3 +3503,287 @@ a.login-button {
     align-items: center;
     justify-content: center;
 }
+
+
+
+
+
+
+/* =========================================
+   HLL — STAFF APPLICATION PAGE
+   ========================================= */
+
+#hll-application-root {
+    width: min(100% - 32px, 1000px);
+    margin: 55px auto;
+    color: #f4f4f5;
+    animation: hllApplicationEnter .45s ease both;
+}
+
+@keyframes hllApplicationEnter {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Main sections and cards */
+
+#hll-application-root section,
+#hll-application-root .hll-app-card,
+#hll-application-root .hll-application-card,
+#hll-application-root .hll-review-card {
+    background: #101114;
+    border: 1px solid #25272d;
+    border-radius: 14px;
+    padding: 25px;
+    margin-bottom: 22px;
+    transition: border-color .2s ease, transform .2s ease;
+}
+
+#hll-application-root section:hover,
+#hll-application-root .hll-app-card:hover,
+#hll-application-root .hll-application-card:hover,
+#hll-application-root .hll-review-card:hover {
+    border-color: #3b465b;
+}
+
+/* Headings */
+
+#hll-application-root h1 {
+    font-size: clamp(28px, 5vw, 42px);
+    font-weight: 800;
+    letter-spacing: -1.5px;
+    margin-bottom: 12px;
+}
+
+#hll-application-root h2 {
+    font-size: 23px;
+    font-weight: 750;
+    margin-bottom: 18px;
+}
+
+#hll-application-root h3 {
+    font-size: 17px;
+    font-weight: 700;
+    margin-bottom: 12px;
+}
+
+#hll-application-root p {
+    color: #a1a1aa;
+    line-height: 1.7;
+}
+
+/* Question groups */
+
+#hll-application-root .hll-question,
+#hll-application-root .hll-app-question {
+    margin: 22px 0;
+}
+
+#hll-application-root label {
+    display: block;
+    color: #e4e4e7;
+    font-size: 14px;
+    font-weight: 650;
+    margin-bottom: 9px;
+}
+
+/* Inputs */
+
+#hll-application-root input,
+#hll-application-root textarea,
+#hll-application-root select {
+    width: 100%;
+    box-sizing: border-box;
+    background: #090a0d;
+    color: #f4f4f5;
+    border: 1px solid #30323a;
+    border-radius: 9px;
+    padding: 13px 15px;
+    font: inherit;
+    font-size: 14px;
+    outline: none;
+    transition: border-color .2s ease, box-shadow .2s ease;
+}
+
+#hll-application-root textarea {
+    min-height: 110px;
+    resize: vertical;
+}
+
+#hll-application-root input:focus,
+#hll-application-root textarea:focus,
+#hll-application-root select:focus {
+    border-color: #668fff;
+    box-shadow: 0 0 0 3px rgba(102, 143, 255, .12);
+}
+
+#hll-application-root input::placeholder,
+#hll-application-root textarea::placeholder {
+    color: #62636d;
+}
+
+/* Buttons */
+
+#hll-application-root button {
+    border: 1px solid #343640;
+    border-radius: 9px;
+    padding: 11px 18px;
+    background: #1a1c22;
+    color: #f4f4f5;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: .2s ease;
+}
+
+#hll-application-root button:hover {
+    background: #292c35;
+    border-color: #626b80;
+    transform: translateY(-1px);
+}
+
+#hll-application-root button:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* Submit and approve */
+
+#hll-application-root button[type="submit"],
+#hll-application-root .hll-submit-button {
+    background: #426de5;
+    border-color: #426de5;
+    color: white;
+}
+
+#hll-application-root button[type="submit"]:hover,
+#hll-application-root .hll-submit-button:hover {
+    background: #5682ff;
+}
+
+#hll-application-root .hll-approve,
+#hll-application-root button[data-action="approve"] {
+    background: #176b49;
+    border-color: #23885e;
+}
+
+#hll-application-root .hll-approve:hover,
+#hll-application-root button[data-action="approve"]:hover {
+    background: #21875e;
+}
+
+/* Reject */
+
+#hll-application-root .hll-reject,
+#hll-application-root button[data-action="reject"] {
+    background: #672c35;
+    border-color: #91414d;
+}
+
+#hll-application-root .hll-reject:hover,
+#hll-application-root button[data-action="reject"]:hover {
+    background: #873844;
+}
+
+/* Status labels */
+
+#hll-application-root .hll-status {
+    display: inline-flex;
+    align-items: center;
+    padding: 5px 11px;
+    border-radius: 20px;
+    background: #242630;
+    color: #b8c5e8;
+    font-size: 12px;
+    font-weight: 750;
+}
+
+#hll-application-root .hll-status.pending {
+    background: #493918;
+    color: #f5ca70;
+}
+
+#hll-application-root .hll-status.approved {
+    background: #153c2d;
+    color: #65d9a2;
+}
+
+#hll-application-root .hll-status.rejected {
+    background: #482329;
+    color: #ff929d;
+}
+
+/* Owner review */
+
+#hll-application-root .hll-review-card {
+    border-left: 3px solid #668fff;
+}
+
+#hll-application-root .hll-review-card select {
+    margin: 12px 0;
+}
+
+#hll-application-root .hll-review-card button {
+    margin: 5px 5px 5px 0;
+}
+
+/* Messages */
+
+#hll-application-root [data-type="success"] {
+    color: #65d9a2 !important;
+}
+
+#hll-application-root [data-type="error"] {
+    color: #ff929d !important;
+}
+
+/* Links */
+
+#hll-application-root a {
+    color: #82a5ff;
+    text-decoration: none;
+}
+
+#hll-application-root a:hover {
+    text-decoration: underline;
+}
+
+/* Mobile */
+
+@media (max-width: 650px) {
+    #hll-application-root {
+        width: min(100% - 22px, 1000px);
+        margin: 30px auto;
+    }
+
+    #hll-application-root section,
+    #hll-application-root .hll-app-card,
+    #hll-application-root .hll-application-card,
+    #hll-application-root .hll-review-card {
+        padding: 18px;
+    }
+
+    #hll-application-root h1 {
+        font-size: 29px;
+    }
+
+    #hll-application-root button {
+        max-width: 100%;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #hll-application-root,
+    #hll-application-root * {
+        animation: none !important;
+        transition: none !important;
+    }
+}
