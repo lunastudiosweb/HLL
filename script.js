@@ -102,6 +102,11 @@ function describeDbError(error) {
     const code = error?.code || "";
     const text = error?.message || "";
 
+    // Messages we raise ourselves (bans, mutes, permission checks)
+    if (code === "P0001" && text) {
+        return text;
+    }
+
     if (code === "42501" || /row-level security/i.test(text)) {
         return "The database blocked this submission (row-level security). " +
                "An INSERT policy is missing for this table.";
@@ -1476,6 +1481,19 @@ function describeLog(log) {
                 `${target} to ${roleLabel(to)}`;
         }
 
+        case "user_banned":
+            return `banned ${target} ` +
+                (d.expires_at ? `until ${new Date(d.expires_at).toLocaleString()}` : "permanently") +
+                (d.reason ? ` (${d.reason})` : "");
+
+        case "user_muted":
+            return `muted ${target} from submitting completions until ` +
+                `${d.expires_at ? new Date(d.expires_at).toLocaleString() : "further notice"}` +
+                (d.reason ? ` (${d.reason})` : "");
+
+        case "restriction_lifted":
+            return `lifted ${target}'s ${d.kind === "mute" ? "mute" : "ban"}`;
+
         case "badge_added":
             return `gave ${target} the ${badgeLabel(d.badge)} badge`;
 
@@ -2114,6 +2132,73 @@ function roleLabel(role) {
     return "Player";
 }
 
+/* ---------- Bans and mutes ---------- */
+
+// "30m", "12h", "7d", "2w" -> minutes (null if not understood)
+function parseDurationMinutes(text) {
+    const match = String(text || "").trim().toLowerCase()
+        .match(/^(\d+(?:\.\d+)?)\s*(m|min|mins|h|hr|hrs|d|day|days|w|wk|wks)?$/);
+
+    if (!match) return null;
+
+    const value = Number(match[1]);
+    const unit = match[2] || "h";
+
+    const minutes = Math.round(
+        value * (
+            unit.startsWith("m") ? 1 :
+            unit.startsWith("h") ? 60 :
+            unit.startsWith("d") ? 1440 : 10080
+        )
+    );
+
+    return minutes >= 1 && minutes <= 525600 ? minutes : null;
+}
+
+function describeRestrictionEnd(expiresAt) {
+    return expiresAt
+        ? `until ${new Date(expiresAt).toLocaleString()}`
+        : "permanently";
+}
+
+// Shows a notice and disables submitting if the signed-in player is restricted.
+async function showRestrictionNotice(form, kinds) {
+    if (!form || !currentUser) return;
+
+    const { data, error } = await supabaseClient.rpc("my_restrictions");
+
+    // Function not installed yet: nothing to show.
+    if (error || !Array.isArray(data)) return;
+
+    const active = data.filter(item => kinds.includes(item.kind));
+
+    if (!active.length) return;
+
+    // The longest restriction decides what we tell the player.
+    const worst = active.find(item => !item.expires_at) ||
+        active.sort((a, b) => new Date(b.expires_at) - new Date(a.expires_at))[0];
+
+    const text = worst.kind === "ban"
+        ? `You are banned from submitting ${describeRestrictionEnd(worst.expires_at)}.`
+        : `You are muted from submitting completions ${describeRestrictionEnd(worst.expires_at)}.`;
+
+    document.getElementById("hll-restriction-notice")?.remove();
+
+    const notice = document.createElement("div");
+    notice.id = "hll-restriction-notice";
+    notice.setAttribute("role", "alert");
+    notice.style.cssText =
+        "margin:0 0 18px;padding:12px 14px;border:1px solid rgba(220,38,38,.4);" +
+        "border-radius:10px;background:rgba(220,38,38,.1);color:#fecaca;font-size:14px;line-height:1.6;";
+    notice.textContent = worst.reason ? `${text} Reason: ${worst.reason}` : text;
+
+    form.insertAdjacentElement("beforebegin", notice);
+
+    form.querySelectorAll("button, input, select, textarea").forEach(control => {
+        control.disabled = true;
+    });
+}
+
 async function openRolesPanel() {
     if (document.getElementById("hll-roles-panel")) return;
 
@@ -2269,6 +2354,20 @@ async function openRolesPanel() {
                 color: #9a9aa6;
             }
 
+            .hll-staff-menu {
+                z-index: 10050;
+            }
+
+            .hll-roles-badge-ban {
+                background: rgba(220, 38, 38, .2);
+                color: #fca5a5;
+            }
+
+            .hll-roles-badge-mute {
+                background: rgba(245, 158, 11, .18);
+                color: #fcd34d;
+            }
+
             .hll-roles-note {
                 margin: 0;
                 color: #9a9aa6;
@@ -2328,6 +2427,64 @@ async function openRolesPanel() {
     document.body.appendChild(overlay);
 
     let users = [];
+    let restrictions = new Map();
+
+    async function loadRestrictions() {
+        const result = await supabaseClient.rpc("staff_list_restrictions");
+
+        restrictions = new Map();
+
+        if (result.error || !Array.isArray(result.data)) return;
+
+        result.data.forEach(item => {
+            const list = restrictions.get(item.user_id) || [];
+            list.push(item);
+            restrictions.set(item.user_id, list);
+        });
+    }
+
+    async function restrict(user, kind, minutes) {
+        const reason = prompt("Reason (optional, saved in the logs):", "");
+
+        if (reason === null) return;
+
+        const { error } = await supabaseClient.rpc("staff_restrict_user", {
+            p_user_id: user.id,
+            p_kind: kind,
+            p_minutes: minutes,
+            p_reason: reason.trim() || null
+        });
+
+        if (error) {
+            alert(
+                /staff_restrict_user|function|schema cache/i.test(error.message || "")
+                    ? "Bans and mutes are not installed in the database yet. Run the restrictions SQL first."
+                    : getErrorMessage(error)
+            );
+            return;
+        }
+
+        await loadRestrictions();
+        renderList();
+    }
+
+    function askDuration(label) {
+        const answer = prompt(
+            `${label} for how long?\nExamples: 30m, 12h, 7d, 2w`,
+            "1d"
+        );
+
+        if (answer === null) return null;
+
+        const minutes = parseDurationMinutes(answer);
+
+        if (!minutes) {
+            alert("Enter a duration like 30m, 12h, 7d or 2w (up to 365 days).");
+            return null;
+        }
+
+        return minutes;
+    }
 
     function onKey(event) {
         if (event.key === "Escape") close();
@@ -2398,7 +2555,20 @@ async function openRolesPanel() {
             chevron.setAttribute("aria-hidden", "true");
             chevron.textContent = "›";
 
-            row.append(name, badge, chevron);
+            row.dataset.userId = user.id;
+
+            const marks = (restrictions.get(user.id) || []).map(item => {
+                const mark = document.createElement("span");
+                mark.className = `hll-roles-badge hll-roles-badge-${item.kind}`;
+                mark.textContent = item.kind === "ban"
+                    ? (item.expires_at ? "Temp banned" : "Banned")
+                    : "Muted";
+                mark.title = `${item.kind === "ban" ? "Banned" : "Muted"} ${describeRestrictionEnd(item.expires_at)}` +
+                    (item.reason ? `: ${item.reason}` : "");
+                return mark;
+            });
+
+            row.append(name, ...marks, badge, chevron);
             row.addEventListener("click", () => renderEditor(user));
 
             body.appendChild(row);
@@ -2598,6 +2768,80 @@ async function openRolesPanel() {
 
     search.addEventListener("input", renderList);
 
+    // Right-click (or long-press) a player to ban or mute them.
+    bindStaffContextMenu(
+        body,
+        ".hll-roles-row",
+        card => users.find(user => user.id === card.dataset.userId),
+        user => {
+            const name = user.username || "Player";
+            const active = restrictions.get(user.id) || [];
+
+            if (user.id === currentUser?.id || user.role) {
+                return {
+                    title: name,
+                    entries: [{
+                        label: user.id === currentUser?.id
+                            ? "You can't restrict yourself"
+                            : "Staff can't be restricted (remove their role first)",
+                        onClick() {}
+                    }]
+                };
+            }
+
+            const entries = [
+                {
+                    label: "Temp ban...",
+                    danger: true,
+                    onClick() {
+                        const minutes = askDuration(`Ban ${name}`);
+                        if (minutes) restrict(user, "ban", minutes);
+                    }
+                },
+                {
+                    label: "Permanent ban",
+                    danger: true,
+                    onClick() {
+                        if (confirm(`Permanently ban ${name} from submitting?`)) {
+                            restrict(user, "ban", null);
+                        }
+                    }
+                },
+                {
+                    label: "Temp mute (no completions)...",
+                    onClick() {
+                        const minutes = askDuration(`Mute ${name}`);
+                        if (minutes) restrict(user, "mute", minutes);
+                    }
+                }
+            ];
+
+            ["ban", "mute"].forEach(kind => {
+                if (!active.some(item => item.kind === kind)) return;
+
+                entries.push({
+                    label: kind === "ban" ? "Lift ban" : "Lift mute",
+                    async onClick() {
+                        const { error } = await supabaseClient.rpc("staff_lift_restriction", {
+                            p_user_id: user.id,
+                            p_kind: kind
+                        });
+
+                        if (error) {
+                            alert(getErrorMessage(error));
+                            return;
+                        }
+
+                        await loadRestrictions();
+                        renderList();
+                    }
+                });
+            });
+
+            return { title: name, entries };
+        }
+    );
+
     body.textContent = "Loading...";
 
     const viewerInfo = await getStaffInfo();
@@ -2618,6 +2862,7 @@ async function openRolesPanel() {
 
     users = data || [];
     sortUsers();
+    await loadRestrictions();
     renderList();
 }
 
@@ -4831,6 +5076,8 @@ function setupLevelSubmission() {
 
     form.dataset.hllBound = "true";
 
+    showRestrictionNotice(form, ["ban"]).catch(() => {});
+
     // ---- Live hints: level ID, duplicates, character counter ----
     const idInput = $("level-id");
     const nameInput = $("level-name");
@@ -5099,6 +5346,8 @@ async function enhanceCompletionForm(levels) {
     form.dataset.hllEnhanced = "true";
 
     ensureCompletionStyles();
+
+    showRestrictionNotice(form, ["ban", "mute"]).catch(() => {});
 
     const levelsById = new Map(levels.map(level => [level.id, level]));
 
