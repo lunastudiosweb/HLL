@@ -4899,6 +4899,260 @@ function setupLevelSubmission() {
    11. COMPLETION SUBMISSIONS
    ========================================================= */
 
+/* ---------- Completion form extras ---------- */
+
+function ensureCompletionStyles() {
+    if (document.getElementById("hll-completion-styles")) return;
+
+    const style = document.createElement("style");
+    style.id = "hll-completion-styles";
+    style.textContent = `
+        .hll-comp-search { width: 100%; min-height: 42px; margin-bottom: 8px; padding: 0 13px; border: 1px solid rgba(255,255,255,.1); border-radius: 10px; background: #08090c; color: #f3f4f7; font: inherit; }
+        .hll-comp-search:focus { outline: none; border-color: rgba(228,71,82,.6); box-shadow: 0 0 0 3px rgba(228,71,82,.14); }
+        .hll-comp-preview { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0 4px; padding: 12px 14px; overflow: hidden; border: 1px solid rgba(255,255,255,.1); border-radius: 12px; background-color: #0f1015; background-size: cover; background-position: right center; }
+        .hll-comp-preview::before { position: absolute; inset: 0; background: linear-gradient(90deg, #0f1015 0%, rgba(15,16,21,.9) 50%, rgba(15,16,21,.45) 100%); content: ""; }
+        .hll-comp-preview > * { position: relative; }
+        .hll-comp-preview strong { display: block; font-size: 15px; }
+        .hll-comp-preview small { color: #a3a6b3; }
+        .hll-comp-points { color: #ff8c95; font-weight: 800; white-space: nowrap; }
+        .hll-comp-hint { display: block; min-height: 18px; margin-top: 6px; color: #8d909c; font-size: 12px; }
+        .hll-comp-hint.is-ok { color: #86efac; }
+        .hll-comp-hint.is-warn { color: #fcd34d; }
+        .hll-comp-hint.is-error { color: #fca5a5; }
+        .hll-comp-mine { margin-top: 28px; }
+        .hll-comp-mine h2 { margin: 0 0 12px; font-size: 20px; }
+        .hll-comp-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; margin-bottom: 8px; border: 1px solid rgba(255,255,255,.09); border-radius: 12px; background: #0f1015; }
+        .hll-comp-row small { display: block; color: #8d909c; }
+        .hll-comp-status { padding: 3px 11px; border-radius: 999px; font-size: 12px; font-weight: 700; text-transform: capitalize; }
+        .hll-comp-status.pending { background: rgba(252,211,77,.12); color: #fcd34d; }
+        .hll-comp-status.approved { background: rgba(134,239,172,.12); color: #86efac; }
+        .hll-comp-status.rejected { background: rgba(252,165,165,.12); color: #fca5a5; }
+    `;
+    document.head.appendChild(style);
+}
+
+function describeEvidenceUrl(value) {
+    if (!value) return { text: "A video link is required (YouTube, Twitch, Google Drive...).", kind: "" };
+
+    let url;
+
+    try {
+        url = new URL(value);
+    } catch {
+        return { text: "That doesn't look like a link yet. Include https://", kind: "error" };
+    }
+
+    if (!/^https?:$/.test(url.protocol)) {
+        return { text: "Use a link starting with https://", kind: "error" };
+    }
+
+    const host = url.hostname.replace(/^www\./, "").toLowerCase();
+
+    if (/(^|\.)(youtube\.com|youtu\.be)$/.test(host)) return { text: "YouTube link looks good.", kind: "ok" };
+    if (/(^|\.)(twitch\.tv)$/.test(host)) return { text: "Twitch link looks good.", kind: "ok" };
+    if (/(^|\.)(drive\.google\.com|streamable\.com|medal\.tv|vimeo\.com)$/.test(host)) {
+        return { text: `${host} link looks good.`, kind: "ok" };
+    }
+
+    return {
+        text: "Unusual host. Make sure staff can open it and see the full run.",
+        kind: "warn"
+    };
+}
+
+async function loadMyCompletionSubmissions(container, userId, levelsById) {
+    const { data, error } = await supabaseClient
+        .from("completion_submissions")
+        .select("id, level_id, status, created_at")
+        .eq("submitted_by", userId)
+        .order("id", { ascending: false })
+        .limit(10);
+
+    if (error || !data) {
+        container.hidden = true;
+        return [];
+    }
+
+    container.hidden = !data.length;
+
+    container.querySelector(".hll-comp-list").innerHTML = data.map(item => {
+        const level = levelsById.get(item.level_id);
+        const status = ["approved", "rejected"].includes(item.status) ? item.status : "pending";
+        const when = item.created_at ? formatDate(new Date(item.created_at)) : "";
+
+        return `
+            <div class="hll-comp-row">
+                <span>
+                    <strong>${escapeHTML(level ? level.name : "Unknown level")}</strong>
+                    <small>${escapeHTML(when)}</small>
+                </span>
+                <span class="hll-comp-status ${status}">${status}</span>
+            </div>
+        `;
+    }).join("");
+
+    return data;
+}
+
+async function enhanceCompletionForm(levels) {
+    const select = $("completion-level");
+    const form = $("completion-form");
+
+    if (!select || !form || form.dataset.hllEnhanced === "true") return;
+
+    form.dataset.hllEnhanced = "true";
+
+    ensureCompletionStyles();
+
+    const levelsById = new Map(levels.map(level => [level.id, level]));
+
+    // ---- Search box above the level picker ----
+    const search = document.createElement("input");
+    search.type = "search";
+    search.className = "hll-comp-search";
+    search.placeholder = "Search levels by name or rank";
+    search.setAttribute("aria-label", "Search levels");
+    select.insertAdjacentElement("beforebegin", search);
+
+    search.addEventListener("input", () => {
+        const term = search.value.trim().toLowerCase();
+
+        [...select.options].forEach(option => {
+            if (!option.value) return;
+            option.hidden = !!term && !option.textContent.toLowerCase().includes(term);
+        });
+
+        // Jump to the first visible match.
+        const first = [...select.options].find(option => option.value && !option.hidden);
+
+        if (term && first) {
+            select.value = first.value;
+            select.dispatchEvent(new Event("change"));
+        }
+    });
+
+    // ---- Selected level preview ----
+    const preview = document.createElement("div");
+    preview.className = "hll-comp-preview";
+    preview.hidden = true;
+    select.insertAdjacentElement("afterend", preview);
+
+    function updatePreview() {
+        const level = levelsById.get(select.value);
+
+        if (!level) {
+            preview.hidden = true;
+            return;
+        }
+
+        const points = calculateLevelPoints(level.rank, level.list_type, level.points);
+
+        preview.hidden = false;
+        preview.style.backgroundImage =
+            level.banner_url && validHttpUrl(level.banner_url)
+                ? `url("${level.banner_url.replace(/"/g, "%22")}")`
+                : "none";
+
+        preview.innerHTML = `
+            <span>
+                <strong>${escapeHTML(level.name)}</strong>
+                <small>#${escapeHTML(level.rank)} · ${level.list_type === "main" ? "Main" : "Extended"} List${level.creator ? ` · by ${escapeHTML(level.creator)}` : ""}</small>
+            </span>
+            <span class="hll-comp-points">+${Number(points).toLocaleString()} pts</span>
+        `;
+    }
+
+    select.addEventListener("change", updatePreview);
+    updatePreview();
+
+    // ---- Prefill GD username from the profile ----
+    const gdField = $("gd-username") || $("completion-gd-username");
+
+    if (gdField && !gdField.value && currentProfile && currentProfile.gd_username) {
+        gdField.value = currentProfile.gd_username;
+    }
+
+    form.addEventListener("reset", () => {
+        setTimeout(() => {
+            updatePreview();
+
+            if (gdField && currentProfile && currentProfile.gd_username) {
+                gdField.value = currentProfile.gd_username;
+            }
+        }, 0);
+    });
+
+    // ---- Evidence link hint ----
+    const evidenceField = $("evidence-url") || $("completion-evidence");
+
+    if (evidenceField) {
+        const hint = document.createElement("span");
+        hint.className = "hll-comp-hint";
+        evidenceField.insertAdjacentElement("afterend", hint);
+
+        const check = () => {
+            const result = describeEvidenceUrl(evidenceField.value.trim());
+            hint.textContent = result.text;
+            hint.className = `hll-comp-hint ${result.kind ? `is-${result.kind}` : ""}`;
+        };
+
+        evidenceField.addEventListener("input", check);
+        form.addEventListener("reset", () => setTimeout(check, 0));
+        check();
+    }
+
+    // ---- Notes counter ----
+    const notesField = $("completion-notes");
+
+    if (notesField) {
+        notesField.maxLength = 500;
+
+        const counter = document.createElement("span");
+        counter.className = "hll-comp-hint";
+        notesField.insertAdjacentElement("afterend", counter);
+
+        const count = () => {
+            counter.textContent = `${notesField.value.length}/500`;
+        };
+
+        notesField.addEventListener("input", count);
+        form.addEventListener("reset", () => setTimeout(count, 0));
+        count();
+    }
+
+    // ---- My submissions with live status ----
+    if (!currentUser) return;
+
+    const mine = document.createElement("section");
+    mine.className = "hll-comp-mine";
+    mine.hidden = true;
+    mine.innerHTML = '<h2>Your recent submissions</h2><div class="hll-comp-list"></div>';
+    form.insertAdjacentElement("afterend", mine);
+
+    const refresh = () =>
+        loadMyCompletionSubmissions(mine, currentUser.id, levelsById)
+            .catch(error => console.warn("Could not load your submissions:", error));
+
+    window.hllRefreshMyCompletions = refresh;
+    refresh();
+
+    try {
+        supabaseClient
+            .channel("hll-my-completions")
+            .on(
+                "postgres_changes",
+                {
+                    event: "*",
+                    schema: "public",
+                    table: "completion_submissions",
+                    filter: `submitted_by=eq.${currentUser.id}`
+                },
+                refresh
+            )
+            .subscribe();
+    } catch { /* live status is optional */ }
+}
+
 async function populateCompletionLevels() {
     const select = $("completion-level");
 
@@ -4923,6 +5177,10 @@ async function populateCompletionLevels() {
     const requested = getQueryParameter("level");
 
     if (requested) select.value = requested;
+
+    enhanceCompletionForm(levels).catch(error => {
+        console.warn("Completion form extras unavailable:", error);
+    });
 }
 
 function setupCompletionSubmission() {
@@ -4981,6 +5239,30 @@ function setupCompletionSubmission() {
                 );
             }
 
+            const [existingDone, existingPending] = await Promise.all([
+                supabaseClient
+                    .from("completions")
+                    .select("id", { count: "exact", head: true })
+                    .eq("user_id", user.id)
+                    .eq("level_id", sentLevelId),
+                supabaseClient
+                    .from("completion_submissions")
+                    .select("id", { count: "exact", head: true })
+                    .eq("submitted_by", user.id)
+                    .eq("level_id", sentLevelId)
+                    .eq("status", "pending")
+            ]);
+
+            if (!existingDone.error && (existingDone.count || 0) > 0) {
+                showMessage(message, "You already have a verified completion for this level.", "error");
+                return;
+            }
+
+            if (!existingPending.error && (existingPending.count || 0) > 0) {
+                showMessage(message, "You already have a pending submission for this level. Staff will review it soon.", "error");
+                return;
+            }
+
             const { error } = await supabaseClient
                 .from("completion_submissions")
                 .insert({
@@ -4997,16 +5279,20 @@ function setupCompletionSubmission() {
             form.reset();
             await populateCompletionLevels();
 
+            if (typeof window.hllRefreshMyCompletions === "function") {
+                window.hllRefreshMyCompletions();
+            }
+
             showMessage(
                 message,
-                "Evidence submitted! Points only count after staff verification.",
+                "Evidence submitted! Staff have been notified. Points only count after verification, and you can follow the status below.",
                 "success"
             );
         } catch (error) {
             console.error("Completion submission failed:", JSON.stringify(error, null, 2));
             showMessage(
                 message,
-                describeDbError(error) + ` [level_id sent: ${sentLevelId}]`,
+                describeDbError(error),
                 "error"
             );
         } finally {
