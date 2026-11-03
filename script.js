@@ -1912,7 +1912,8 @@ async function setupStaffMenu() {
 
     const entries = [
         { label: "Staff Dashboard", sub: "Review submissions", href: "staff.html" },
-        { label: "Moderation", sub: "Queues, reports, appeals and flags", hash: "moderation", onClick: openModerationPanel }
+        { label: "Moderation", sub: "Queues, reports, appeals and flags", hash: "moderation", onClick: openModerationPanel },
+        { label: "Staff Hub", sub: "Chat, announcements, polls and cases", hash: "staff-hub", onClick: () => openStaffHub() }
     ];
 
     if (info.is_owner) {
@@ -2107,7 +2108,14 @@ async function setupStaffMenu() {
     window.addEventListener("scroll", close, { passive: true });
     window.addEventListener("resize", close);
 
+    // Unread @mention count on the Staff tab, refreshed every minute.
+    refreshStaffMentionBadge();
+    setInterval(() => {
+        if (!document.hidden) refreshStaffMentionBadge();
+    }, 60000);
+
     if (location.hash === "#moderation") openModerationPanel();
+    if (location.hash === "#staff-hub") openStaffHub();
     if (isAdmin && location.hash === "#logs") openLogsPanel();
     if (isAdmin && location.hash === "#roles") openRolesPanel();
 }
@@ -3147,7 +3155,16 @@ async function openModerationPanel() {
             }));
         }
 
+        const discuss = el("button", "", "Discuss");
+        discuss.type = "button";
+        discuss.addEventListener("click", () => openStaffCase(
+            "ticket",
+            ticket.id,
+            `${TICKET_LABELS[ticket.kind]}: ${ticket.target_name || ticket.created_by_name || ticket.id}`
+        ));
+
         actions.append(
+            discuss,
             actionButton("Resolve", "ok", resolve("resolved")),
             actionButton("Dismiss", "no", resolve("dismissed"))
         );
@@ -4402,8 +4419,9 @@ function setupLevelContextMenu(list, levels, staffInfo) {
                 { label: "Move up", perm: "manage_levels", onClick: () => moveLevel(level, "up") },
                 { label: "Move down", perm: "manage_levels", onClick: () => moveLevel(level, "down") },
                 { label: "Completions…", perm: "remove_completions", onClick: () => openLevelCompletionsModal(level) },
+                { label: "Staff discussion…", onClick: () => openStaffCase("level", level.id, level.name) },
                 { label: "Remove level", perm: "manage_levels", danger: true, onClick: () => removeLevel(level) }
-            ].filter(entry => staffCan(staffInfo, entry.perm))
+            ].filter(entry => !entry.perm || staffCan(staffInfo, entry.perm))
         })
     );
 }
@@ -7726,6 +7744,19 @@ async function renderProfile() {
         heading.insertAdjacentElement("afterend", report);
     }
 
+    getStaffInfo().then(staffInfo => {
+        if (!staffInfo || document.getElementById("hll-profile-case")) return;
+
+        const discuss = document.createElement("button");
+        discuss.id = "hll-profile-case";
+        discuss.type = "button";
+        discuss.className = "button button-secondary";
+        discuss.style.margin = "10px 0 10px 8px";
+        discuss.textContent = "Staff discussion";
+        discuss.addEventListener("click", () => openStaffCase("player", profile.id, profile.username));
+        heading.insertAdjacentElement("afterend", discuss);
+    }).catch(() => {});
+
     renderProfileBanner(
         profile,
         heading.closest("section") || heading.parentElement
@@ -7910,6 +7941,17 @@ async function renderLevelDetail() {
     });
 
     title.insertAdjacentElement("afterend", levelTools);
+
+    getStaffInfo().then(staffInfo => {
+        if (!staffInfo || !document.body.contains(levelTools)) return;
+
+        const discuss = document.createElement("button");
+        discuss.type = "button";
+        discuss.className = "button button-secondary";
+        discuss.textContent = "Staff discussion";
+        discuss.addEventListener("click", () => openStaffCase("level", level.id, level.name));
+        levelTools.appendChild(discuss);
+    }).catch(() => {});
 
     if ($("level-list-type")) {
         $("level-list-type").textContent =
@@ -9127,6 +9169,1165 @@ async function setupStaffDashboard() {
     }
 }
 
+
+/* =========================================================
+   STAFF HUB
+   Staff chat, announcements, internal discussions, case threads,
+   polls, @mentions and pinned messages.
+   Needs the tables and functions from staff-hub.sql.
+   ========================================================= */
+
+const HUB_CHANNELS = [
+    {
+        id: "general",
+        label: "Staff chat",
+        desc: "Private messaging for the whole staff team."
+    },
+    {
+        id: "announcements",
+        label: "Announcements",
+        desc: "Important messages from management. Only admins can post here."
+    },
+    {
+        id: "discussions",
+        label: "Internal discussions",
+        desc: "Debate proposed ranking changes and other internal topics."
+    }
+];
+
+// "case:level:<id>" -> { type: "level", id: "<id>" }
+function parseCaseChannel(channel) {
+    const match = /^case:(level|ticket|player):(.+)$/.exec(String(channel || ""));
+
+    return match ? { type: match[1], id: match[2] } : null;
+}
+
+function caseChannelId(type, id) {
+    return `case:${type}:${String(id).replace(/[^A-Za-z0-9_-]/g, "")}`;
+}
+
+function hubErrorMessage(error) {
+    const text = error?.message || "";
+
+    if (/staff_messages|staff_post_message|staff_vote|staff_pin_message|staff_list_staff|schema cache|does not exist/i.test(text) &&
+        !/Only admins|Staff only/i.test(text)) {
+        return "The staff hub is not installed in the database yet. Run staff-hub.sql in Supabase first.";
+    }
+
+    return describeDbError(error);
+}
+
+function ensureStaffHubStyles() {
+    if (document.getElementById("hll-hub-styles")) return;
+
+    const style = document.createElement("style");
+    style.id = "hll-hub-styles";
+    style.textContent = `
+        .hll-hub-overlay { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 14px; background: rgba(0,0,0,.72); }
+        .hll-hub-box { display: flex; flex-direction: column; width: min(1100px, 100%); height: min(92vh, 860px); border: 1px solid rgba(255,255,255,.12); border-radius: 18px; background: #0f1015; color: #f3f4f7; box-shadow: 0 30px 80px rgba(0,0,0,.65); overflow: hidden; }
+        .hll-hub-head { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid rgba(255,255,255,.08); }
+        .hll-hub-head h2 { margin: 0 auto 0 0; font-size: 20px; letter-spacing: -.02em; }
+        .hll-hub-head button, .hll-hub-composer button, .hll-hub-pin-bar button { padding: 8px 14px; border: 1px solid rgba(255,255,255,.14); border-radius: 9px; background: rgba(255,255,255,.05); color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
+        .hll-hub-head button:hover, .hll-hub-composer button:hover:not(:disabled) { background: rgba(255,255,255,.1); }
+        .hll-hub-layout { display: flex; flex: 1; min-height: 0; }
+        .hll-hub-side { display: flex; flex: 0 0 240px; flex-direction: column; gap: 2px; padding: 12px 10px; border-right: 1px solid rgba(255,255,255,.08); overflow-y: auto; background: rgba(255,255,255,.015); }
+        .hll-hub-side h4 { margin: 14px 10px 6px; color: #737785; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+        .hll-hub-side h4:first-child { margin-top: 2px; }
+        .hll-hub-chan { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: none; color: #b4b7c1; font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+        .hll-hub-chan:hover { background: rgba(255,255,255,.06); color: #fff; }
+        .hll-hub-chan.is-active { background: rgba(228,71,82,.16); color: #fff; }
+        .hll-hub-chan span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .hll-hub-badge { flex: 0 0 auto; min-width: 20px; padding: 1px 7px; border-radius: 999px; background: #e44752; color: #fff; font-size: 11px; font-weight: 700; text-align: center; }
+        .hll-hub-side-note { margin: 8px 10px; color: #737785; font-size: 12px; line-height: 1.5; }
+        .hll-hub-main { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+        .hll-hub-chan-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 12px 20px; border-bottom: 1px solid rgba(255,255,255,.06); }
+        .hll-hub-chan-head h3 { margin: 0; font-size: 17px; }
+        .hll-hub-chan-head p { margin: 0; color: #8d909c; font-size: 13px; }
+        .hll-hub-chan-head a { color: #7fb4ff; font-size: 13px; }
+        .hll-hub-pin-bar { padding: 8px 20px; border-bottom: 1px solid rgba(255,255,255,.06); background: rgba(245,192,74,.05); }
+        .hll-hub-pin-bar[hidden] { display: none; }
+        .hll-hub-pin-bar summary { color: #f5c04a; font-size: 13px; font-weight: 600; cursor: pointer; }
+        .hll-hub-pin-item { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-top: 1px solid rgba(255,255,255,.06); font-size: 13px; }
+        .hll-hub-pin-item:first-of-type { margin-top: 8px; }
+        .hll-hub-pin-item .hll-hub-text { flex: 1; min-width: 0; }
+        .hll-hub-pin-item small { display: block; color: #8d909c; }
+        .hll-hub-pin-bar button { padding: 3px 9px; font-size: 12px; }
+        .hll-hub-list { flex: 1; padding: 8px 20px; overflow-y: auto; }
+        .hll-hub-empty { padding: 40px 10px; color: #8d909c; text-align: center; }
+        .hll-hub-older { display: block; margin: 8px auto 12px; padding: 6px 14px; border: 1px solid rgba(255,255,255,.14); border-radius: 999px; background: none; color: #a3a6b3; font: inherit; font-size: 12px; cursor: pointer; }
+        .hll-hub-msg { padding: 8px 10px; margin: 0 -10px; border-radius: 10px; }
+        .hll-hub-msg:hover { background: rgba(255,255,255,.035); }
+        .hll-hub-msg.is-pinned { border-left: 3px solid #f5c04a; }
+        .hll-hub-msg.is-mentioned { background: rgba(228,71,82,.08); }
+        .hll-hub-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 13px; }
+        .hll-hub-meta strong { font-size: 14px; }
+        .hll-hub-meta small { color: #737785; }
+        .hll-hub-role { padding: 1px 8px; border-radius: 999px; background: rgba(255,255,255,.08); color: #b9b9c4; font-size: 11px; }
+        .hll-hub-role.admin { background: rgba(245,192,74,.16); color: #f5c04a; }
+        .hll-hub-role.moderator { background: rgba(127,180,255,.16); color: #7fb4ff; }
+        .hll-hub-text { margin: 3px 0 0; font-size: 14px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+        .hll-hub-mention { padding: 0 4px; border-radius: 4px; background: rgba(127,180,255,.16); color: #9fc7ff; font-weight: 600; }
+        .hll-hub-mention.is-me { background: rgba(228,71,82,.25); color: #ffb3b9; }
+        .hll-hub-actions { display: flex; gap: 10px; margin-top: 4px; opacity: .35; transition: opacity .15s; }
+        .hll-hub-msg:hover .hll-hub-actions, .hll-hub-msg:focus-within .hll-hub-actions { opacity: 1; }
+        .hll-hub-actions button { padding: 0; border: 0; background: none; color: #8d909c; font: inherit; font-size: 12px; cursor: pointer; }
+        .hll-hub-actions button:hover { color: #fff; text-decoration: underline; }
+        .hll-hub-poll { display: grid; gap: 6px; max-width: 460px; margin-top: 8px; padding: 12px 14px; border: 1px solid rgba(255,255,255,.1); border-radius: 12px; background: #14161d; }
+        .hll-hub-poll > strong { font-size: 14px; }
+        .hll-hub-poll small { color: #8d909c; font-size: 12px; }
+        .hll-hub-option { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 8px 11px; overflow: hidden; border: 1px solid rgba(255,255,255,.12); border-radius: 9px; background: #0b0c10; color: inherit; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+        .hll-hub-option:disabled { cursor: default; }
+        .hll-hub-option.is-mine { border-color: rgba(66,211,146,.6); }
+        .hll-hub-option i { position: absolute; inset: 0 auto 0 0; background: rgba(228,71,82,.2); }
+        .hll-hub-option.is-mine i { background: rgba(66,211,146,.2); }
+        .hll-hub-option span { position: relative; }
+        .hll-hub-composer { position: relative; display: grid; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid rgba(255,255,255,.08); }
+        .hll-hub-composer textarea, .hll-hub-composer input, .hll-hub-composer select { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; background: #08090c; color: inherit; font: inherit; font-size: 14px; }
+        .hll-hub-composer textarea { min-height: 46px; max-height: 160px; resize: vertical; }
+        .hll-hub-composer textarea:focus, .hll-hub-composer input:focus { outline: none; border-color: rgba(228,71,82,.6); }
+        .hll-hub-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+        .hll-hub-row .hll-hub-spacer { margin-right: auto; color: #737785; font-size: 12px; }
+        .hll-hub-composer .hll-hub-send { border-color: transparent; background: #e44752; color: #fff; font-weight: 600; }
+        .hll-hub-composer button:disabled, .hll-hub-composer textarea:disabled { opacity: .5; cursor: not-allowed; }
+        .hll-hub-pollform { display: grid; gap: 8px; padding: 12px; border: 1px solid rgba(255,255,255,.1); border-radius: 12px; background: rgba(255,255,255,.03); }
+        .hll-hub-pollform[hidden] { display: none; }
+        .hll-hub-status { min-height: 18px; font-size: 13px; }
+        .hll-hub-suggest { position: absolute; left: 20px; bottom: 100%; z-index: 2; min-width: 200px; max-height: 190px; padding: 4px; overflow-y: auto; border: 1px solid rgba(255,255,255,.14); border-radius: 10px; background: #17171c; box-shadow: 0 12px 32px rgba(0,0,0,.55); }
+        .hll-hub-suggest[hidden] { display: none; }
+        .hll-hub-suggest button { display: block; width: 100%; padding: 7px 10px; border: 0; border-radius: 6px; background: none; color: #f2f2f5; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+        .hll-hub-suggest button:hover, .hll-hub-suggest button.is-on { background: rgba(255,255,255,.1); }
+        #hll-staff-tab .hll-hub-tab-badge { margin-left: 6px; padding: 0 6px; border-radius: 999px; background: #e44752; color: #fff; font-size: 11px; font-weight: 700; }
+        @media (max-width: 700px) {
+            .hll-hub-overlay { padding: 0; }
+            .hll-hub-box { height: 100vh; border-radius: 0; }
+            .hll-hub-layout { flex-direction: column; }
+            .hll-hub-side { flex: 0 0 auto; flex-direction: row; align-items: center; padding: 8px; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid rgba(255,255,255,.08); }
+            .hll-hub-side h4, .hll-hub-side-note { display: none; }
+            .hll-hub-chan { width: auto; flex: 0 0 auto; white-space: nowrap; }
+            .hll-hub-list, .hll-hub-chan-head, .hll-hub-composer, .hll-hub-pin-bar { padding-left: 14px; padding-right: 14px; }
+            .hll-hub-suggest { left: 14px; }
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+// Shows how many unread @mentions you have on the Staff tab.
+function setStaffMentionBadge(count) {
+    const tab = document.getElementById("hll-staff-tab");
+
+    if (!tab) return;
+
+    tab.querySelector(".hll-hub-tab-badge")?.remove();
+
+    if (!count) return;
+
+    ensureStaffHubStyles();
+
+    const badge = document.createElement("span");
+    badge.className = "hll-hub-tab-badge";
+    badge.textContent = count > 99 ? "99+" : String(count);
+    badge.title = `${count} unread mention${count === 1 ? "" : "s"}`;
+    tab.appendChild(badge);
+}
+
+async function refreshStaffMentionBadge() {
+    if (!currentUser) return;
+
+    const { count, error } = await supabaseClient
+        .from("staff_mentions")
+        .select("id", { count: "exact", head: true })
+        .eq("read", false);
+
+    // Hub not installed yet: nothing to show.
+    if (error) return;
+
+    setStaffMentionBadge(count || 0);
+}
+
+async function openStaffHub(options = {}) {
+    if (document.getElementById("hll-hub-panel")) {
+        if (options.channel && typeof window.hllHubSwitch === "function") {
+            window.hllHubSwitch(options.channel, options.title);
+        }
+
+        return;
+    }
+
+    const info = await getStaffInfo();
+
+    if (!info || !currentUser) return;
+
+    ensureStaffHubStyles();
+
+    const isAdmin = info.role === "admin";
+    const myId = currentUser.id;
+    const myName = String(currentProfile?.username || "").toLowerCase();
+
+    const h = (tag, className, text) => {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+    };
+
+    const state = {
+        channel: options.channel || "general",
+        title: options.title || "",
+        limit: 60,
+        exhausted: false,
+        messages: [],
+        pins: [],
+        polls: new Map(),        // message id -> { poll, votes }
+        names: new Map(),        // user id -> { username, role }
+        staffByName: new Map(),  // lowercase username -> user id
+        threads: [],
+        unread: new Map(),       // channel -> unread mention count
+        mentioned: new Set(),    // message ids that mention you
+        firstLoad: true
+    };
+
+    // ---------- Shell ----------
+    const overlay = h("div", "hll-hub-overlay");
+    overlay.id = "hll-hub-panel";
+
+    const box = h("div", "hll-hub-box");
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+    box.setAttribute("aria-label", "Staff hub");
+
+    const head = h("div", "hll-hub-head");
+    head.appendChild(h("h2", "", "Staff hub"));
+
+    const closeButton = h("button", "", "Close");
+    closeButton.type = "button";
+    head.appendChild(closeButton);
+
+    const layout = h("div", "hll-hub-layout");
+    const side = h("nav", "hll-hub-side");
+    side.setAttribute("aria-label", "Staff channels");
+
+    const main = h("div", "hll-hub-main");
+    const chanHead = h("div", "hll-hub-chan-head");
+
+    const pinBar = h("details", "hll-hub-pin-bar");
+    pinBar.hidden = true;
+
+    const list = h("div", "hll-hub-list");
+    list.setAttribute("aria-live", "polite");
+
+    // Composer
+    const composer = h("form", "hll-hub-composer");
+    composer.noValidate = true;
+
+    const suggest = h("div", "hll-hub-suggest");
+    suggest.hidden = true;
+
+    const textarea = h("textarea");
+    textarea.maxLength = 2000;
+    textarea.rows = 2;
+    textarea.setAttribute("aria-label", "Message");
+
+    const pollForm = h("div", "hll-hub-pollform");
+    pollForm.hidden = true;
+
+    const pollQuestion = h("input");
+    pollQuestion.type = "text";
+    pollQuestion.maxLength = 200;
+    pollQuestion.placeholder = "Poll question";
+
+    const pollOptions = h("textarea");
+    pollOptions.rows = 4;
+    pollOptions.placeholder = "One option per line (2 to 8)";
+
+    const pollDuration = h("select");
+
+    [
+        ["", "No deadline"],
+        ["1", "Closes in 1 hour"],
+        ["24", "Closes in 24 hours"],
+        ["72", "Closes in 3 days"],
+        ["168", "Closes in 1 week"]
+    ].forEach(([value, text]) => {
+        const option = h("option", "", text);
+        option.value = value;
+        pollDuration.appendChild(option);
+    });
+
+    pollForm.append(pollQuestion, pollOptions, pollDuration);
+
+    const buttons = h("div", "hll-hub-row");
+
+    const pollToggle = h("button", "", "Add poll");
+    pollToggle.type = "button";
+
+    const templateButton = h("button", "", "Ranking proposal");
+    templateButton.type = "button";
+
+    const counter = h("span", "hll-hub-spacer", "0/2000");
+
+    const sendButton = h("button", "hll-hub-send", "Send");
+    sendButton.type = "submit";
+
+    buttons.append(pollToggle, templateButton, counter, sendButton);
+
+    const status = h("p", "hll-hub-status");
+    status.setAttribute("role", "status");
+
+    composer.append(suggest, textarea, pollForm, buttons, status);
+
+    main.append(chanHead, pinBar, list, composer);
+    layout.append(side, main);
+    box.append(head, layout);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    // ---------- Helpers ----------
+    function say(text, type) {
+        status.textContent = text || "";
+        status.style.color =
+            type === "error" ? "#fca5a5" : type === "success" ? "#86efac" : "#a3a6b3";
+    }
+
+    function when(value) {
+        return new Date(value).toLocaleString([], {
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit"
+        });
+    }
+
+    const nameOf = id => state.names.get(id)?.username || "Former staff";
+
+    async function ensureNames(ids) {
+        const missing = [...new Set(ids.filter(Boolean))].filter(id => !state.names.has(id));
+
+        if (!missing.length) return;
+
+        const { data } = await supabaseClient
+            .from("profiles")
+            .select("id, username")
+            .in("id", missing);
+
+        (data || []).forEach(profile => {
+            state.names.set(profile.id, { username: profile.username, role: null });
+        });
+    }
+
+    async function loadStaffList() {
+        const { data, error } = await supabaseClient.rpc("staff_list_staff");
+
+        if (error) throw error;
+
+        (data || []).forEach(person => {
+            state.names.set(person.user_id, { username: person.username, role: person.role });
+            state.staffByName.set(String(person.username || "").toLowerCase(), person.user_id);
+        });
+    }
+
+    const channelInfo = () => HUB_CHANNELS.find(item => item.id === state.channel) || null;
+    const isCase = () => !!parseCaseChannel(state.channel);
+
+    const canPost = () => state.channel !== "announcements" || isAdmin;
+    const canPin = () => state.channel !== "announcements" || isAdmin;
+
+    // ---------- Rendering ----------
+    function mentionNodes(text) {
+        const frag = document.createDocumentFragment();
+
+        String(text).split(/(@[A-Za-z0-9_-]+)/g).forEach(part => {
+            if (!part) return;
+
+            if (/^@[A-Za-z0-9_-]+$/.test(part)) {
+                const name = part.slice(1).toLowerCase();
+                const everyone = name === "all" || name === "everyone";
+
+                if (everyone || state.staffByName.has(name)) {
+                    const span = h("span", "hll-hub-mention", part);
+
+                    if (everyone || name === myName) span.classList.add("is-me");
+
+                    frag.appendChild(span);
+                    return;
+                }
+            }
+
+            frag.appendChild(document.createTextNode(part));
+        });
+
+        return frag;
+    }
+
+    function pollNode(message) {
+        const entry = state.polls.get(message.id);
+
+        if (!entry) return null;
+
+        const { poll, votes } = entry;
+        const options = Array.isArray(poll.options) ? poll.options : [];
+        const closed = !!poll.closes_at && new Date(poll.closes_at) <= new Date();
+        const mine = votes.find(vote => vote.user_id === myId);
+
+        const wrap = h("div", "hll-hub-poll");
+        wrap.appendChild(h("strong", "", poll.question));
+
+        options.forEach((label, index) => {
+            const voters = votes.filter(vote => vote.option_index === index);
+            const percent = votes.length ? Math.round((voters.length / votes.length) * 100) : 0;
+
+            const button = h("button", "hll-hub-option");
+            button.type = "button";
+            button.disabled = closed;
+
+            if (mine && mine.option_index === index) button.classList.add("is-mine");
+
+            button.title = voters.length
+                ? voters.map(vote => nameOf(vote.user_id)).join(", ")
+                : "No votes yet";
+
+            const bar = h("i");
+            bar.style.width = `${percent}%`;
+
+            button.append(
+                bar,
+                h("span", "", String(label)),
+                h("span", "", `${voters.length} · ${percent}%`)
+            );
+
+            button.addEventListener("click", async () => {
+                const { error } = await supabaseClient.rpc("staff_vote", {
+                    p_poll_id: poll.id,
+                    p_option: index
+                });
+
+                if (error) {
+                    say(hubErrorMessage(error), "error");
+                    return;
+                }
+
+                say("");
+                await refresh();
+            });
+
+            wrap.appendChild(button);
+        });
+
+        wrap.appendChild(h("small", "",
+            `${votes.length} vote${votes.length === 1 ? "" : "s"}` +
+            (poll.closes_at
+                ? closed
+                    ? " · closed"
+                    : ` · closes ${when(poll.closes_at)}`
+                : " · you can change your vote")
+        ));
+
+        return wrap;
+    }
+
+    function messageNode(message, { compact = false } = {}) {
+        const row = h("article", "hll-hub-msg");
+
+        if (message.pinned) row.classList.add("is-pinned");
+        if (state.mentioned.has(message.id)) row.classList.add("is-mentioned");
+
+        const meta = h("div", "hll-hub-meta");
+        meta.appendChild(h("strong", "", nameOf(message.author_id)));
+
+        const role = state.names.get(message.author_id)?.role;
+
+        if (role) meta.appendChild(h("span", `hll-hub-role ${role}`, roleLabel(role)));
+
+        meta.appendChild(h("small", "", when(message.created_at)));
+
+        if (message.pinned) meta.appendChild(h("small", "", "pinned"));
+
+        row.appendChild(meta);
+
+        const text = h("p", "hll-hub-text");
+        text.appendChild(mentionNodes(message.body));
+        row.appendChild(text);
+
+        const poll = pollNode(message);
+        if (poll) row.appendChild(poll);
+
+        if (!compact) {
+            const actions = h("div", "hll-hub-actions");
+
+            if (canPin()) {
+                const pin = h("button", "", message.pinned ? "Unpin" : "Pin");
+                pin.type = "button";
+                pin.addEventListener("click", () => togglePin(message));
+                actions.appendChild(pin);
+            }
+
+            if (message.author_id === myId || isAdmin) {
+                const del = h("button", "", "Delete");
+                del.type = "button";
+                del.addEventListener("click", () => deleteMessage(message));
+                actions.appendChild(del);
+            }
+
+            if (actions.childNodes.length) row.appendChild(actions);
+        }
+
+        return row;
+    }
+
+    function renderSide() {
+        side.textContent = "";
+
+        const addChannel = (id, label, title) => {
+            const button = h("button", `hll-hub-chan${state.channel === id ? " is-active" : ""}`);
+            button.type = "button";
+            button.appendChild(h("span", "", label));
+
+            const unread = state.unread.get(id) || 0;
+
+            if (unread) button.appendChild(h("span", "hll-hub-badge", String(unread)));
+
+            button.addEventListener("click", () => switchChannel(id, title));
+            side.appendChild(button);
+        };
+
+        side.appendChild(h("h4", "", "Channels"));
+        HUB_CHANNELS.forEach(item => addChannel(item.id, item.label));
+
+        side.appendChild(h("h4", "", "Case discussions"));
+
+        const threads = [...state.threads];
+
+        if (isCase() && !threads.some(thread => thread.channel === state.channel)) {
+            threads.unshift({ channel: state.channel, title: state.title || "New case" });
+        }
+
+        if (!threads.length) {
+            side.appendChild(h("p", "hll-hub-side-note",
+                "Right-click a level on a list and choose Staff discussion, or press Discuss on a report or appeal in Moderation."));
+        }
+
+        threads.forEach(thread => {
+            const parsed = parseCaseChannel(thread.channel);
+            const kind = parsed ? { level: "Level", ticket: "Ticket", player: "Player" }[parsed.type] : "Case";
+
+            addChannel(thread.channel, `${kind}: ${thread.title || "Untitled"}`, thread.title);
+        });
+    }
+
+    function renderHead() {
+        chanHead.textContent = "";
+
+        const parsed = parseCaseChannel(state.channel);
+
+        if (parsed) {
+            const kind = { level: "Level", ticket: "Ticket", player: "Player" }[parsed.type];
+
+            chanHead.appendChild(h("h3", "", `${kind} case: ${state.title || "Untitled"}`));
+            chanHead.appendChild(h("p", "", "Only staff can see this thread."));
+
+            const href =
+                parsed.type === "level" ? `level.html?id=${encodeURIComponent(parsed.id)}` :
+                parsed.type === "player" ? `profile.html?id=${encodeURIComponent(parsed.id)}` : "";
+
+            if (href) {
+                const link = h("a", "", parsed.type === "level" ? "Open level" : "Open profile");
+                link.href = href;
+                link.target = "_blank";
+                link.rel = "noopener";
+                chanHead.appendChild(link);
+            }
+        } else {
+            const channel = channelInfo();
+
+            chanHead.appendChild(h("h3", "", channel ? channel.label : "Channel"));
+            chanHead.appendChild(h("p", "", channel ? channel.desc : ""));
+        }
+
+        const allowed = canPost();
+
+        textarea.disabled = !allowed;
+        sendButton.disabled = !allowed;
+        pollToggle.disabled = !allowed;
+        templateButton.hidden = state.channel !== "discussions";
+
+        textarea.placeholder = allowed
+            ? "Write a message. Use @username to notify someone, @all for everyone."
+            : "Only admins can post announcements.";
+    }
+
+    function renderPins() {
+        pinBar.textContent = "";
+        pinBar.hidden = !state.pins.length;
+
+        if (!state.pins.length) return;
+
+        pinBar.appendChild(h("summary", "", `Pinned messages (${state.pins.length})`));
+
+        state.pins.forEach(message => {
+            const item = h("div", "hll-hub-pin-item");
+            const body = h("div", "hll-hub-text");
+
+            body.appendChild(mentionNodes(message.body));
+            body.appendChild(h("small", "", `${nameOf(message.author_id)} · ${when(message.created_at)}`));
+
+            item.appendChild(body);
+
+            if (canPin()) {
+                const unpin = h("button", "", "Unpin");
+                unpin.type = "button";
+                unpin.addEventListener("click", () => togglePin(message));
+                item.appendChild(unpin);
+            }
+
+            pinBar.appendChild(item);
+        });
+    }
+
+    function renderList(keepOffset) {
+        const nearBottom =
+            list.scrollHeight - list.scrollTop - list.clientHeight < 90;
+        const previousHeight = list.scrollHeight;
+
+        list.textContent = "";
+
+        if (!state.exhausted && state.messages.length) {
+            const older = h("button", "hll-hub-older", "Load older messages");
+            older.type = "button";
+            older.addEventListener("click", async () => {
+                state.limit += 60;
+                await refresh({ keepOffset: true });
+            });
+            list.appendChild(older);
+        }
+
+        if (!state.messages.length) {
+            list.appendChild(h("p", "hll-hub-empty",
+                state.channel === "announcements" && !isAdmin
+                    ? "No announcements yet."
+                    : "No messages yet. Say something!"));
+        }
+
+        state.messages.forEach(message => list.appendChild(messageNode(message)));
+
+        if (keepOffset) {
+            list.scrollTop = list.scrollHeight - previousHeight;
+        } else if (state.firstLoad || nearBottom) {
+            list.scrollTop = list.scrollHeight;
+        }
+
+        state.firstLoad = false;
+    }
+
+    function renderAll(keepOffset) {
+        renderSide();
+        renderHead();
+        renderPins();
+        renderList(keepOffset);
+    }
+
+    // ---------- Loading ----------
+    async function loadSidebarData() {
+        const [threadsResult, mentionsResult] = await Promise.all([
+            supabaseClient
+                .from("staff_messages")
+                .select("channel, channel_title, created_at")
+                .like("channel", "case:%")
+                .order("created_at", { ascending: false })
+                .limit(500),
+            supabaseClient
+                .from("staff_mentions")
+                .select("message_id")
+                .eq("read", false)
+        ]);
+
+        if (threadsResult.error) throw threadsResult.error;
+
+        const seen = new Map();
+
+        (threadsResult.data || []).forEach(row => {
+            if (!seen.has(row.channel)) {
+                seen.set(row.channel, { channel: row.channel, title: row.channel_title || "Untitled" });
+            }
+        });
+
+        state.threads = [...seen.values()];
+
+        state.unread = new Map();
+
+        const ids = (mentionsResult.data || []).map(row => row.message_id);
+
+        if (ids.length) {
+            const { data } = await supabaseClient
+                .from("staff_messages")
+                .select("id, channel")
+                .in("id", ids);
+
+            (data || []).forEach(row => {
+                state.unread.set(row.channel, (state.unread.get(row.channel) || 0) + 1);
+            });
+        }
+
+        let total = 0;
+        state.unread.forEach(count => { total += count; });
+        setStaffMentionBadge(total);
+    }
+
+    async function loadMessages() {
+        const [messagesResult, pinsResult] = await Promise.all([
+            supabaseClient
+                .from("staff_messages")
+                .select("*")
+                .eq("channel", state.channel)
+                .order("created_at", { ascending: false })
+                .limit(state.limit),
+            supabaseClient
+                .from("staff_messages")
+                .select("*")
+                .eq("channel", state.channel)
+                .eq("pinned", true)
+                .order("created_at", { ascending: false })
+        ]);
+
+        if (messagesResult.error) throw messagesResult.error;
+
+        const rows = messagesResult.data || [];
+
+        state.exhausted = rows.length < state.limit;
+        state.messages = [...rows].reverse();
+        state.pins = pinsResult.data || [];
+
+        const all = [...state.messages, ...state.pins];
+        const messageIds = [...new Set(all.map(message => message.id))];
+
+        // Which of these messages mention you
+        state.mentioned = new Set();
+
+        const unreadMentions = messageIds.length
+            ? await supabaseClient
+                .from("staff_mentions")
+                .select("message_id")
+                .in("message_id", messageIds)
+            : { data: [] };
+
+        (unreadMentions.data || []).forEach(row => state.mentioned.add(row.message_id));
+
+        // Polls and votes
+        state.polls = new Map();
+
+        let voterIds = [];
+
+        if (messageIds.length) {
+            const pollsResult = await supabaseClient
+                .from("staff_polls")
+                .select("*")
+                .in("message_id", messageIds);
+
+            const polls = pollsResult.data || [];
+
+            if (polls.length) {
+                const votesResult = await supabaseClient
+                    .from("staff_poll_votes")
+                    .select("poll_id, user_id, option_index")
+                    .in("poll_id", polls.map(poll => poll.id));
+
+                const votes = votesResult.data || [];
+
+                voterIds = votes.map(vote => vote.user_id);
+
+                polls.forEach(poll => {
+                    state.polls.set(poll.message_id, {
+                        poll,
+                        votes: votes.filter(vote => vote.poll_id === poll.id)
+                    });
+                });
+            }
+        }
+
+        await ensureNames([...all.map(message => message.author_id), ...voterIds]);
+    }
+
+    let refreshing = false;
+    let refreshAgain = false;
+
+    async function refresh({ keepOffset = false } = {}) {
+        if (refreshing) {
+            refreshAgain = true;
+            return;
+        }
+
+        refreshing = true;
+
+        try {
+            await Promise.all([loadMessages(), loadSidebarData()]);
+            renderAll(keepOffset);
+        } catch (error) {
+            console.error("Staff hub refresh failed:", error);
+
+            list.textContent = "";
+            list.appendChild(h("p", "hll-hub-empty", hubErrorMessage(error)));
+        } finally {
+            refreshing = false;
+
+            if (refreshAgain) {
+                refreshAgain = false;
+                refresh();
+            }
+        }
+    }
+
+    let refreshTimer = null;
+
+    function scheduleRefresh() {
+        clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(() => refresh(), 250);
+    }
+
+    async function markRead() {
+        if (!(state.unread.get(state.channel) > 0)) return;
+
+        const { error } = await supabaseClient.rpc("staff_mark_mentions_read", {
+            p_channel: state.channel
+        });
+
+        if (!error) {
+            state.unread.delete(state.channel);
+            await loadSidebarData().catch(() => {});
+            renderSide();
+        }
+    }
+
+    async function switchChannel(channel, title) {
+        state.channel = channel;
+        state.title = title || state.threads.find(thread => thread.channel === channel)?.title || "";
+        state.limit = 60;
+        state.firstLoad = true;
+
+        textarea.value = "";
+        counter.textContent = "0/2000";
+        pollForm.hidden = true;
+        pollToggle.textContent = "Add poll";
+        say("");
+
+        await refresh();
+        await markRead();
+        renderAll();
+    }
+
+    window.hllHubSwitch = switchChannel;
+
+    // ---------- Actions ----------
+    async function togglePin(message) {
+        const { error } = await supabaseClient.rpc("staff_pin_message", {
+            p_message_id: message.id,
+            p_pinned: !message.pinned
+        });
+
+        if (error) {
+            say(hubErrorMessage(error), "error");
+            return;
+        }
+
+        say("");
+        await refresh();
+    }
+
+    async function deleteMessage(message) {
+        if (!confirm("Delete this message? This cannot be undone.")) return;
+
+        const { error } = await supabaseClient.rpc("staff_delete_message", {
+            p_message_id: message.id
+        });
+
+        if (error) {
+            say(hubErrorMessage(error), "error");
+            return;
+        }
+
+        say("");
+        await refresh();
+    }
+
+    pollToggle.addEventListener("click", () => {
+        pollForm.hidden = !pollForm.hidden;
+        pollToggle.textContent = pollForm.hidden ? "Add poll" : "Remove poll";
+
+        if (pollForm.hidden) {
+            pollQuestion.value = "";
+            pollOptions.value = "";
+            pollDuration.value = "";
+        } else {
+            pollQuestion.focus();
+        }
+    });
+
+    templateButton.addEventListener("click", () => {
+        textarea.value =
+            "[Ranking proposal] Move <level> from #<current> to #<proposed>\nReason: ";
+        textarea.focus();
+        counter.textContent = `${textarea.value.length}/2000`;
+    });
+
+    composer.addEventListener("submit", async event => {
+        event.preventDefault();
+
+        if (!canPost()) return;
+
+        let body = textarea.value.trim();
+        const withPoll = !pollForm.hidden;
+
+        let question = null;
+        let options = null;
+        let hours = null;
+
+        if (withPoll) {
+            question = pollQuestion.value.trim();
+
+            options = pollOptions.value
+                .split("\n")
+                .map(line => line.trim())
+                .filter(Boolean);
+
+            if (!question) return say("Enter the poll question.", "error");
+
+            if (options.length < 2 || options.length > 8) {
+                return say("A poll needs between 2 and 8 options, one per line.", "error");
+            }
+
+            if (options.some(option => option.length > 100)) {
+                return say("Each poll option must be 100 characters or fewer.", "error");
+            }
+
+            if (new Set(options.map(option => option.toLowerCase())).size !== options.length) {
+                return say("Poll options must be different from each other.", "error");
+            }
+
+            hours = pollDuration.value ? Number(pollDuration.value) : null;
+
+            if (!body) body = question;
+        }
+
+        if (!body) return say("Write a message first.", "error");
+
+        sendButton.disabled = true;
+        say("Sending...");
+
+        const { error } = await supabaseClient.rpc("staff_post_message", {
+            p_channel: state.channel,
+            p_body: body,
+            p_channel_title: isCase() ? (state.title || null) : null,
+            p_poll_question: question,
+            p_poll_options: options,
+            p_poll_hours: hours
+        });
+
+        sendButton.disabled = !canPost();
+
+        if (error) {
+            console.error("Staff message failed:", error);
+            say(hubErrorMessage(error), "error");
+            return;
+        }
+
+        textarea.value = "";
+        pollQuestion.value = "";
+        pollOptions.value = "";
+        pollDuration.value = "";
+        pollForm.hidden = true;
+        pollToggle.textContent = "Add poll";
+        counter.textContent = "0/2000";
+        suggest.hidden = true;
+        say("");
+
+        state.firstLoad = true;
+        await refresh();
+        textarea.focus();
+    });
+
+    // ---------- @mention suggestions ----------
+    let suggestIndex = 0;
+
+    function currentMentionQuery() {
+        const upToCursor = textarea.value.slice(0, textarea.selectionStart);
+        const match = /(^|\s)@([A-Za-z0-9_-]*)$/.exec(upToCursor);
+
+        return match ? match[2].toLowerCase() : null;
+    }
+
+    function updateSuggestions() {
+        const query = currentMentionQuery();
+
+        if (query === null) {
+            suggest.hidden = true;
+            return;
+        }
+
+        const names = ["all", ...[...state.names.values()]
+            .filter(person => person.role)
+            .map(person => person.username)];
+
+        const matches = [...new Set(names)]
+            .filter(name => String(name).toLowerCase().startsWith(query))
+            .slice(0, 8);
+
+        suggest.textContent = "";
+
+        if (!matches.length) {
+            suggest.hidden = true;
+            return;
+        }
+
+        suggestIndex = Math.min(suggestIndex, matches.length - 1);
+
+        matches.forEach((name, index) => {
+            const button = h("button", index === suggestIndex ? "is-on" : "",
+                name === "all" ? "@all (notify everyone)" : `@${name}`);
+            button.type = "button";
+            button.dataset.name = name;
+
+            // mousedown so the textarea keeps focus
+            button.addEventListener("mousedown", event => {
+                event.preventDefault();
+                insertMention(name);
+            });
+
+            suggest.appendChild(button);
+        });
+
+        suggest.hidden = false;
+    }
+
+    function insertMention(name) {
+        const cursor = textarea.selectionStart;
+        const before = textarea.value.slice(0, cursor).replace(/@[A-Za-z0-9_-]*$/, `@${name} `);
+        const after = textarea.value.slice(cursor);
+
+        textarea.value = before + after;
+        textarea.selectionStart = textarea.selectionEnd = before.length;
+        suggest.hidden = true;
+        counter.textContent = `${textarea.value.length}/2000`;
+        textarea.focus();
+    }
+
+    textarea.addEventListener("input", () => {
+        counter.textContent = `${textarea.value.length}/2000`;
+        suggestIndex = 0;
+        updateSuggestions();
+    });
+
+    textarea.addEventListener("keydown", event => {
+        if (!suggest.hidden) {
+            const items = [...suggest.querySelectorAll("button")];
+
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault();
+                suggestIndex =
+                    (suggestIndex + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+                updateSuggestions();
+                return;
+            }
+
+            if (event.key === "Enter" || event.key === "Tab") {
+                event.preventDefault();
+                insertMention(items[suggestIndex].dataset.name);
+                return;
+            }
+
+            if (event.key === "Escape") {
+                event.stopPropagation();
+                suggest.hidden = true;
+                return;
+            }
+        }
+
+        // Enter sends, Shift+Enter makes a new line.
+        if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+            event.preventDefault();
+            composer.requestSubmit();
+        }
+    });
+
+    textarea.addEventListener("blur", () => {
+        setTimeout(() => { suggest.hidden = true; }, 120);
+    });
+
+    // ---------- Live updates ----------
+    let realtime = null;
+    let poller = null;
+
+    try {
+        realtime = supabaseClient.channel("hll-staff-hub");
+
+        ["staff_messages", "staff_polls", "staff_poll_votes", "staff_mentions"].forEach(table => {
+            realtime.on("postgres_changes", { event: "*", schema: "public", table }, scheduleRefresh);
+        });
+
+        realtime.subscribe();
+    } catch (realtimeError) {
+        console.warn("Staff hub realtime unavailable:", realtimeError);
+    }
+
+    // Safety net if Realtime is not enabled for these tables.
+    poller = setInterval(() => {
+        if (!document.hidden) refresh();
+    }, 20000);
+
+    // ---------- Closing ----------
+    function onKey(event) {
+        if (event.key === "Escape") close();
+    }
+
+    function close() {
+        clearTimeout(refreshTimer);
+        clearInterval(poller);
+
+        try {
+            if (realtime) supabaseClient.removeChannel(realtime);
+        } catch { /* already closed */ }
+
+        overlay.remove();
+        document.removeEventListener("keydown", onKey);
+        delete window.hllHubSwitch;
+
+        if (location.hash === "#staff-hub") clearUrlHash();
+
+        refreshStaffMentionBadge();
+    }
+
+    closeButton.addEventListener("click", close);
+    document.addEventListener("keydown", onKey);
+
+    overlay.addEventListener("click", event => {
+        if (event.target === overlay) close();
+    });
+
+    // ---------- Start ----------
+    list.textContent = "Loading...";
+
+    try {
+        await loadStaffList();
+    } catch (error) {
+        console.error("Staff hub could not load staff:", error);
+
+        list.textContent = "";
+        list.appendChild(h("p", "hll-hub-empty", hubErrorMessage(error)));
+        renderSide();
+        renderHead();
+        return;
+    }
+
+    await refresh();
+    await markRead();
+    renderAll();
+
+    if (!isCase()) textarea.focus();
+}
+
+// Opens the hub on the discussion thread for one level, ticket or player.
+function openStaffCase(type, id, name) {
+    return openStaffHub({
+        channel: caseChannelId(type, id),
+        title: name || ""
+    });
+}
 
 /* =========================================================
    16. START HLL
