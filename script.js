@@ -7135,28 +7135,138 @@ async function setupSettings() {
     }
 
     // DELETE ACCOUNT
-    // Disabled until secure server-side deletion exists.
 
     const deleteButton = $("delete-account-button");
 
-    if (deleteButton) {
-        deleteButton.disabled = true;
+    if (deleteButton && deleteButton.dataset.hllDeleteBound !== "true") {
+        deleteButton.dataset.hllDeleteBound = "true";
+        deleteButton.disabled = false;
+        deleteButton.removeAttribute("title");
 
-        deleteButton.title =
-            "Account deletion is unavailable until a secure server endpoint is deployed.";
-
-        if (deleteButton.dataset.hllDeleteBound !== "true") {
-            deleteButton.dataset.hllDeleteBound = "true";
-
-            deleteButton.addEventListener("click", () => {
-                showMessage(
-                    $("delete-account-message"),
-                    "Account deletion is not enabled yet. A secure server-side Supabase Edge Function must be deployed first. No account data has been deleted.",
-                    "error"
-                );
-            });
-        }
+        deleteButton.addEventListener("click", () => {
+            openDeleteAccountDialog(user, currentProfile, $("delete-account-message"));
+        });
     }
+}
+
+function openDeleteAccountDialog(user, profile, messageElement) {
+    if (document.getElementById("hll-delete-dialog")) return;
+
+    const username = (profile && profile.username) || "";
+    const phrase = username || "DELETE";
+
+    const overlay = document.createElement("div");
+    overlay.id = "hll-delete-dialog";
+    overlay.style.cssText =
+        "position:fixed;inset:0;z-index:10000;display:flex;align-items:center;" +
+        "justify-content:center;padding:16px;background:rgba(0,0,0,.75);";
+
+    const box = document.createElement("div");
+    box.setAttribute("role", "alertdialog");
+    box.setAttribute("aria-modal", "true");
+    box.style.cssText =
+        "width:min(460px,100%);padding:24px;border:1px solid rgba(239,68,68,.35);" +
+        "border-radius:16px;background:#14161d;color:#f3f4f7;" +
+        "box-shadow:0 24px 60px rgba(0,0,0,.6);font:inherit;";
+
+    box.innerHTML = `
+        <h3 style="margin:0 0 10px;font-size:20px;color:#fca5a5">Delete your account?</h3>
+        <p style="margin:0 0 10px;color:#a3a6b3;font-size:14px;line-height:1.6">
+            This permanently deletes your login, profile, verified completions
+            and submissions. Your points will leave the leaderboard.
+            <strong style="color:#f3f4f7">This cannot be undone.</strong>
+        </p>
+        <label for="hll-delete-input" style="display:block;margin:14px 0 6px;font-size:14px;font-weight:600">
+            Type <code style="color:#fca5a5">${escapeHTML(phrase)}</code> to confirm
+        </label>
+        <input id="hll-delete-input" autocomplete="off" style="width:100%;padding:11px 13px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:#08090c;color:inherit;font:inherit">
+        <p id="hll-delete-error" role="alert" style="min-height:20px;margin:10px 0 0;color:#fca5a5;font-size:13px"></p>
+        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px">
+            <button type="button" id="hll-delete-cancel" style="padding:10px 16px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:rgba(255,255,255,.05);color:inherit;font:inherit;cursor:pointer">Cancel</button>
+            <button type="button" id="hll-delete-confirm" disabled style="padding:10px 16px;border:0;border-radius:10px;background:#b91c1c;color:#fff;font:inherit;font-weight:600;cursor:pointer;opacity:.5">Delete my account</button>
+        </div>
+    `;
+
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    const input = box.querySelector("#hll-delete-input");
+    const confirmButton = box.querySelector("#hll-delete-confirm");
+    const cancelButton = box.querySelector("#hll-delete-cancel");
+    const errorLine = box.querySelector("#hll-delete-error");
+
+    function onKey(event) {
+        if (event.key === "Escape") close();
+    }
+
+    function close() {
+        overlay.remove();
+        document.removeEventListener("keydown", onKey);
+    }
+
+    document.addEventListener("keydown", onKey);
+    cancelButton.addEventListener("click", close);
+
+    overlay.addEventListener("click", event => {
+        if (event.target === overlay) close();
+    });
+
+    input.addEventListener("input", () => {
+        const ok = input.value.trim() === phrase;
+        confirmButton.disabled = !ok;
+        confirmButton.style.opacity = ok ? "1" : ".5";
+    });
+
+    input.focus();
+
+    confirmButton.addEventListener("click", async () => {
+        if (input.value.trim() !== phrase) return;
+
+        confirmButton.disabled = true;
+        cancelButton.disabled = true;
+        confirmButton.textContent = "Deleting...";
+        errorLine.textContent = "";
+
+        try {
+            // Remove uploaded images first (best effort).
+            try {
+                const { data: files } = await supabaseClient.storage
+                    .from(PROFILE_MEDIA_BUCKET)
+                    .list(user.id);
+
+                if (files && files.length) {
+                    await supabaseClient.storage
+                        .from(PROFILE_MEDIA_BUCKET)
+                        .remove(files.map(file => `${user.id}/${file.name}`));
+                }
+            } catch { /* images are optional */ }
+
+            const { error } = await supabaseClient.rpc("delete_my_account");
+
+            if (error) {
+                throw new Error(
+                    /delete_my_account|function|schema cache/i.test(error.message || "")
+                        ? "Account deletion is not installed in the database yet. Run the delete account SQL first."
+                        : getErrorMessage(error)
+                );
+            }
+
+            try { await supabaseClient.auth.signOut(); } catch { /* already gone */ }
+
+            currentUser = null;
+            currentProfile = null;
+
+            try { sessionStorage.setItem("hllAccountDeleted", "1"); } catch { /* optional */ }
+
+            location.href = "index.html";
+        } catch (error) {
+            console.error("Account deletion failed:", error);
+            errorLine.textContent = error.message || "Could not delete your account.";
+            confirmButton.disabled = false;
+            cancelButton.disabled = false;
+            confirmButton.textContent = "Delete my account";
+        }
+    });
 }
 
 
