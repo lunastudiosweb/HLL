@@ -2199,6 +2199,129 @@ async function showRestrictionNotice(form, kinds) {
     });
 }
 
+// Shared by the Roles panel and the Players tab menu.
+async function fetchActiveRestrictions() {
+    const result = await supabaseClient.rpc("staff_list_restrictions");
+    const map = new Map();
+
+    if (result.error || !Array.isArray(result.data)) return map;
+
+    result.data.forEach(item => {
+        const list = map.get(item.user_id) || [];
+        list.push(item);
+        map.set(item.user_id, list);
+    });
+
+    return map;
+}
+
+function askRestrictionDuration(label) {
+    const answer = prompt(
+        `${label} for how long?\nExamples: 30m, 12h, 7d, 2w`,
+        "1d"
+    );
+
+    if (answer === null) return null;
+
+    const minutes = parseDurationMinutes(answer);
+
+    if (!minutes) {
+        alert("Enter a duration like 30m, 12h, 7d or 2w (up to 365 days).");
+        return null;
+    }
+
+    return minutes;
+}
+
+// Returns true when the restriction was applied.
+async function applyUserRestriction(user, kind, minutes) {
+    const reason = prompt("Reason (optional, saved in the logs):", "");
+
+    if (reason === null) return false;
+
+    const { error } = await supabaseClient.rpc("staff_restrict_user", {
+        p_user_id: user.id,
+        p_kind: kind,
+        p_minutes: minutes,
+        p_reason: reason.trim() || null
+    });
+
+    if (error) {
+        alert(
+            /staff_restrict_user|function|schema cache/i.test(error.message || "")
+                ? "Bans and mutes are not installed in the database yet. Run the restrictions SQL first."
+                : getErrorMessage(error)
+        );
+        return false;
+    }
+
+    return true;
+}
+
+async function liftUserRestriction(userId, kind) {
+    const { error } = await supabaseClient.rpc("staff_lift_restriction", {
+        p_user_id: userId,
+        p_kind: kind
+    });
+
+    if (error) {
+        alert(getErrorMessage(error));
+        return false;
+    }
+
+    return true;
+}
+
+// Menu entries shared by both places. `after` runs once something changed.
+function restrictionMenuEntries(user, active, after) {
+    const name = user.username || "Player";
+
+    const entries = [
+        {
+            label: "Temp ban...",
+            danger: true,
+            async onClick() {
+                const minutes = askRestrictionDuration(`Ban ${name}`);
+                if (minutes && await applyUserRestriction(user, "ban", minutes)) after();
+            }
+        },
+        {
+            label: "Permanent ban",
+            danger: true,
+            async onClick() {
+                if (!confirm(`Permanently ban ${name} from submitting?`)) return;
+                if (await applyUserRestriction(user, "ban", null)) after();
+            }
+        },
+        {
+            label: "Temp mute (no completions)...",
+            async onClick() {
+                const minutes = askRestrictionDuration(`Mute ${name}`);
+                if (minutes && await applyUserRestriction(user, "mute", minutes)) after();
+            }
+        }
+    ];
+
+    ["ban", "mute"].forEach(kind => {
+        if (!(active || []).some(item => item.kind === kind)) return;
+
+        entries.push({
+            label: kind === "ban" ? "Lift ban" : "Lift mute",
+            async onClick() {
+                if (await liftUserRestriction(user.id, kind)) after();
+            }
+        });
+    });
+
+    return entries;
+}
+
+function restrictionTagText(item) {
+    return item.kind === "ban"
+        ? (item.expires_at ? "TEMP BANNED" : "BANNED")
+        : "MUTED";
+}
+
 async function openRolesPanel() {
     if (document.getElementById("hll-roles-panel")) return;
 
@@ -2430,60 +2553,7 @@ async function openRolesPanel() {
     let restrictions = new Map();
 
     async function loadRestrictions() {
-        const result = await supabaseClient.rpc("staff_list_restrictions");
-
-        restrictions = new Map();
-
-        if (result.error || !Array.isArray(result.data)) return;
-
-        result.data.forEach(item => {
-            const list = restrictions.get(item.user_id) || [];
-            list.push(item);
-            restrictions.set(item.user_id, list);
-        });
-    }
-
-    async function restrict(user, kind, minutes) {
-        const reason = prompt("Reason (optional, saved in the logs):", "");
-
-        if (reason === null) return;
-
-        const { error } = await supabaseClient.rpc("staff_restrict_user", {
-            p_user_id: user.id,
-            p_kind: kind,
-            p_minutes: minutes,
-            p_reason: reason.trim() || null
-        });
-
-        if (error) {
-            alert(
-                /staff_restrict_user|function|schema cache/i.test(error.message || "")
-                    ? "Bans and mutes are not installed in the database yet. Run the restrictions SQL first."
-                    : getErrorMessage(error)
-            );
-            return;
-        }
-
-        await loadRestrictions();
-        renderList();
-    }
-
-    function askDuration(label) {
-        const answer = prompt(
-            `${label} for how long?\nExamples: 30m, 12h, 7d, 2w`,
-            "1d"
-        );
-
-        if (answer === null) return null;
-
-        const minutes = parseDurationMinutes(answer);
-
-        if (!minutes) {
-            alert("Enter a duration like 30m, 12h, 7d or 2w (up to 365 days).");
-            return null;
-        }
-
-        return minutes;
+        restrictions = await fetchActiveRestrictions();
     }
 
     function onKey(event) {
@@ -2789,53 +2859,9 @@ async function openRolesPanel() {
                 };
             }
 
-            const entries = [
-                {
-                    label: "Temp ban...",
-                    danger: true,
-                    onClick() {
-                        const minutes = askDuration(`Ban ${name}`);
-                        if (minutes) restrict(user, "ban", minutes);
-                    }
-                },
-                {
-                    label: "Permanent ban",
-                    danger: true,
-                    onClick() {
-                        if (confirm(`Permanently ban ${name} from submitting?`)) {
-                            restrict(user, "ban", null);
-                        }
-                    }
-                },
-                {
-                    label: "Temp mute (no completions)...",
-                    onClick() {
-                        const minutes = askDuration(`Mute ${name}`);
-                        if (minutes) restrict(user, "mute", minutes);
-                    }
-                }
-            ];
-
-            ["ban", "mute"].forEach(kind => {
-                if (!active.some(item => item.kind === kind)) return;
-
-                entries.push({
-                    label: kind === "ban" ? "Lift ban" : "Lift mute",
-                    async onClick() {
-                        const { error } = await supabaseClient.rpc("staff_lift_restriction", {
-                            p_user_id: user.id,
-                            p_kind: kind
-                        });
-
-                        if (error) {
-                            alert(getErrorMessage(error));
-                            return;
-                        }
-
-                        await loadRestrictions();
-                        renderList();
-                    }
-                });
+            const entries = restrictionMenuEntries(user, active, async () => {
+                await loadRestrictions();
+                renderList();
             });
 
             return { title: name, entries };
@@ -4143,6 +4169,21 @@ function setupPlayerContextMenu(list, players, staffInfo) {
             }, true);
         }
 
+        // Bans and mutes (admins only)
+        if (viewerIsAdmin) {
+            const divider = document.createElement("div");
+            divider.className = "hll-staff-menu-title";
+            divider.textContent = "Bans and mutes";
+            menu.appendChild(divider);
+
+            restrictionMenuEntries(player, player.restrictions, reloadPage).forEach(entry => {
+                addItem(entry.label, () => {
+                    closeMenu();
+                    entry.onClick();
+                }, entry.danger);
+            });
+        }
+
         document.body.appendChild(menu);
 
         const rect = menu.getBoundingClientRect();
@@ -5008,7 +5049,7 @@ async function renderPlayersList() {
                         </span>
                         <span>
                             ${player.completions}
-                            verified level${player.completions === 1 ? "" : "s"}${player.hidden ? " · HIDDEN FROM LEADERBOARD" : ""}
+                            verified level${player.completions === 1 ? "" : "s"}${player.hidden ? " · HIDDEN FROM LEADERBOARD" : ""}${(player.restrictions || []).map(item => ` · ${restrictionTagText(item)}`).join("")}
                         </span>
                     </span>
 
@@ -5036,6 +5077,19 @@ async function renderPlayersList() {
     }
 
     const playersStaffInfo = isStaff ? await getStaffInfo() : null;
+
+    // Admins see who is banned or muted.
+    if (playersStaffInfo?.role === "admin") {
+        const active = await fetchActiveRestrictions();
+
+        if (active.size) {
+            players.forEach(player => {
+                player.restrictions = active.get(player.id) || [];
+            });
+
+            render(players);
+        }
+    }
 
     if (playersStaffInfo && staffCan(playersStaffInfo, "manage_players")) {
         setupPlayerContextMenu(list, players, playersStaffInfo);
