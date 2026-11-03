@@ -10436,3 +10436,850 @@ async function startHLL() {
 }
 
 document.addEventListener("DOMContentLoaded", startHLL);
+
+
+
+
+/* =========================================================
+   HLL STAFF APPLICATION SYSTEM
+   Additional code — does not replace existing functions.
+   ========================================================= */
+
+const HLL_STAFF_QUESTIONS = [
+    "How long have you been playing Geometry Dash?",
+    "How long have you been following the Geometry Dash Demon List?",
+    "What is the hardest demon you have completed?",
+    "What is the hardest demon you have seriously attempted?",
+    "How familiar are you with the current Pointercrate Demon List?",
+    "What makes a level difficult enough to deserve a place on a hardest-level list?",
+    "How would you compare the difficulty of two levels with very different gameplay?",
+    "How would you evaluate a level that has extremely difficult gameplay but very few verified completions?",
+    "What factors should be considered when deciding a level's rank?",
+    "How would you handle a disagreement between two staff members about a level's placement?",
+    "What would you do if a level's difficulty changed significantly after more players completed it?",
+    "How would you investigate a potentially false completion record?",
+    "What evidence would you expect before accepting a completion claim?",
+    "How would you respond to a player disputing their level's placement?",
+    "What would you do if a popular player asked you to give their level a higher rank?",
+    "How would you make sure your personal opinions do not affect your ranking decisions?",
+    "What is the difference between a level being difficult and a level being consistently difficult for players?",
+    "How would you evaluate a newly verified extreme demon with very little community data?",
+    "What would you do if you discovered that an existing HLL ranking contained incorrect information?",
+    "Why is accurate documentation important when maintaining a Geometry Dash hardest-level list?",
+    "Why do you want to become an HLL staff member?"
+];
+
+function hllApplicationStyles() {
+    if (document.getElementById("hll-application-styles")) return;
+
+    const style = document.createElement("style");
+    style.id = "hll-application-styles";
+
+    style.textContent = `
+        #hll-application-root {
+            width: min(900px, calc(100% - 32px));
+            margin: 50px auto;
+            color: #f2f2f5;
+            font-family: inherit;
+        }
+
+        .hll-app-heading {
+            margin-bottom: 28px;
+        }
+
+        .hll-app-heading h1 {
+            font-size: clamp(28px, 5vw, 42px);
+            margin: 0 0 10px;
+        }
+
+        .hll-app-heading p,
+        .hll-app-muted {
+            color: #9999a5;
+            line-height: 1.65;
+        }
+
+        .hll-app-card {
+            background: #151519;
+            border: 1px solid rgba(255,255,255,.1);
+            border-radius: 13px;
+            padding: 22px;
+            margin-bottom: 18px;
+        }
+
+        .hll-app-card h2 {
+            margin: 0 0 8px;
+            font-size: 20px;
+        }
+
+        .hll-app-progress {
+            height: 5px;
+            background: #292930;
+            border-radius: 20px;
+            overflow: hidden;
+            margin: 15px 0 25px;
+        }
+
+        .hll-app-progress span {
+            display: block;
+            height: 100%;
+            width: 0;
+            background: #fff;
+            transition: width .2s ease;
+        }
+
+        .hll-app-field {
+            margin: 0 0 24px;
+        }
+
+        .hll-app-field label {
+            display: block;
+            margin-bottom: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            line-height: 1.6;
+        }
+
+        .hll-app-field label small {
+            display: block;
+            color: #858590;
+            font-weight: 400;
+            margin-top: 3px;
+        }
+
+        .hll-app-field textarea,
+        .hll-app-field input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 13px 14px;
+            background: #0d0d11;
+            color: #fff;
+            border: 1px solid #34343d;
+            border-radius: 8px;
+            font: inherit;
+            font-size: 14px;
+            outline: none;
+        }
+
+        .hll-app-field textarea {
+            min-height: 105px;
+            resize: vertical;
+        }
+
+        .hll-app-field textarea:focus,
+        .hll-app-field input:focus {
+            border-color: #aaa;
+        }
+
+        .hll-app-button {
+            padding: 12px 19px;
+            border: 0;
+            border-radius: 8px;
+            background: #f2f2f5;
+            color: #111;
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .hll-app-button:disabled {
+            opacity: .45;
+            cursor: not-allowed;
+        }
+
+        .hll-app-button.secondary {
+            background: #303038;
+            color: #fff;
+        }
+
+        .hll-app-button.danger {
+            background: #662b32;
+            color: white;
+        }
+
+        .hll-app-status {
+            margin-top: 16px;
+            line-height: 1.6;
+            font-size: 14px;
+        }
+
+        .hll-app-application {
+            border: 1px solid rgba(255,255,255,.1);
+            border-radius: 10px;
+            padding: 18px;
+            margin-top: 14px;
+            background: #101014;
+        }
+
+        .hll-app-application h3 {
+            margin: 0 0 8px;
+        }
+
+        .hll-app-answer {
+            padding: 13px 0;
+            border-top: 1px solid rgba(255,255,255,.08);
+        }
+
+        .hll-app-answer strong {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 13px;
+            color: #bcbcc7;
+        }
+
+        .hll-app-answer p {
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            line-height: 1.6;
+            margin: 0;
+            font-size: 14px;
+        }
+
+        .hll-app-role {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 11px;
+            margin: 12px 0;
+            background: #0d0d11;
+            color: white;
+            border: 1px solid #44444d;
+            border-radius: 8px;
+            font: inherit;
+        }
+
+        .hll-app-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 9px;
+        }
+
+        .hll-app-count {
+            font-size: 12px;
+            color: #858590;
+            text-align: right;
+            margin-top: 5px;
+        }
+
+        .hll-app-divider {
+            border: 0;
+            border-top: 1px solid rgba(255,255,255,.1);
+            margin: 22px 0;
+        }
+
+        .hll-app-tag {
+            display: inline-block;
+            padding: 4px 9px;
+            border-radius: 20px;
+            background: #292930;
+            color: #ddd;
+            font-size: 11px;
+            margin-bottom: 10px;
+        }
+
+        @media(max-width:600px) {
+            #hll-application-root {
+                margin-top: 25px;
+            }
+
+            .hll-app-card {
+                padding: 16px;
+            }
+        }
+    `;
+
+    document.head.appendChild(style);
+}
+
+function hllAppElement(tag, className, content) {
+    const element = document.createElement(tag);
+
+    if (className) element.className = className;
+    if (content !== undefined) element.textContent = content;
+
+    return element;
+}
+
+async function hllIsOwner() {
+    if (!currentUser) return false;
+
+    const { data, error } = await supabaseClient
+        .from("staff_members")
+        .select("role, is_owner")
+        .eq("user_id", currentUser.id)
+        .maybeSingle();
+
+    if (error) throw error;
+
+    return data?.role === "admin" && data?.is_owner === true;
+}
+
+async function setupHLLStaffApplication() {
+    const root = $("hll-application-root");
+    if (!root) return;
+
+    hllApplicationStyles();
+
+    root.textContent = "Loading HLL application system...";
+
+    try {
+        const user = await requireLogin();
+        if (!user) return;
+
+        const owner = await hllIsOwner();
+
+        root.textContent = "";
+
+        const heading = hllAppElement("div", "hll-app-heading");
+        heading.append(
+            hllAppElement("h1", "", "HLL Staff Applications"),
+            hllAppElement(
+                "p",
+                "",
+                "Apply to become part of the Hardest Levels List staff team."
+            )
+        );
+
+        root.appendChild(heading);
+
+        const intro = hllAppElement("div", "hll-app-card");
+
+        intro.append(
+            hllAppElement("h2", "", "Before you apply"),
+            hllAppElement(
+                "p",
+                "hll-app-muted",
+                "Applications are reviewed personally by the HLL owner. " +
+                "Answer every question honestly and provide detailed answers. " +
+                "Submitting an application does not guarantee acceptance."
+            )
+        );
+
+        root.appendChild(intro);
+
+        if (owner) {
+            const reviewButton = hllAppElement(
+                "button",
+                "hll-app-button secondary",
+                "Open application review"
+            );
+
+            reviewButton.type = "button";
+            reviewButton.addEventListener("click", () => {
+                document.getElementById("hll-owner-review")
+                    ?.scrollIntoView({ behavior: "smooth" });
+            });
+
+            root.appendChild(reviewButton);
+        }
+
+        await hllRenderApplicationForm(root);
+
+        if (owner) {
+            await hllRenderOwnerApplications(root);
+        }
+
+    } catch (error) {
+        console.error("HLL application error:", error);
+
+        root.textContent =
+            "Could not load the application system: " +
+            getErrorMessage(error);
+    }
+}
+
+async function hllRenderApplicationForm(root) {
+    const { data: previous, error } = await supabaseClient
+        .from("staff_applications")
+        .select("*")
+        .eq("applicant_id", currentUser.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    if (error) throw error;
+
+    if (previous?.status === "pending") {
+        const card = hllAppElement("div", "hll-app-card");
+
+        card.append(
+            hllAppElement("h2", "", "Application under review"),
+            hllAppElement(
+                "p",
+                "hll-app-muted",
+                "Your application was submitted on " +
+                formatDate(previous.created_at) +
+                ". The owner has not made a decision yet."
+            ),
+            hllAppElement("span", "hll-app-tag", "PENDING")
+        );
+
+        root.appendChild(card);
+        return;
+    }
+
+    if (previous?.status === "approved") {
+        const card = hllAppElement("div", "hll-app-card");
+
+        card.append(
+            hllAppElement("h2", "", "Application approved"),
+            hllAppElement(
+                "p",
+                "hll-app-muted",
+                "Your application was approved for the " +
+                roleLabel(previous.assigned_role) + " role."
+            ),
+            hllAppElement("span", "hll-app-tag", "APPROVED")
+        );
+
+        root.appendChild(card);
+        return;
+    }
+
+    const card = hllAppElement("div", "hll-app-card");
+
+    card.append(
+        hllAppElement("h2", "", "Staff application form"),
+        hllAppElement(
+            "p",
+            "hll-app-muted",
+            "There are 22 required questions. Please provide thoughtful answers."
+        )
+    );
+
+    const progress = hllAppElement("div", "hll-app-progress");
+    const progressBar = document.createElement("span");
+    progress.appendChild(progressBar);
+
+    const counter = hllAppElement("div", "hll-app-count", "0 / 22 answered");
+
+    card.append(progress, counter);
+
+    const form = document.createElement("form");
+    form.id = "hll-staff-application-form";
+
+    const answers = {};
+
+    function makeField(key, question, index, placeholder) {
+        const wrapper = hllAppElement("div", "hll-app-field");
+
+        const label = document.createElement("label");
+        label.textContent = `${index + 1}. ${question}`;
+
+        const textarea = document.createElement("textarea");
+        textarea.name = key;
+        textarea.required = true;
+        textarea.minLength = 10;
+        textarea.maxLength = 3000;
+        textarea.placeholder = placeholder ||
+            "Write your answer here...";
+
+        const count = hllAppElement(
+            "div",
+            "hll-app-count",
+            "0 / 3000"
+        );
+
+        textarea.addEventListener("input", updateProgress);
+
+        textarea.addEventListener("input", () => {
+            count.textContent =
+                `${textarea.value.length} / 3000`;
+        });
+
+        wrapper.append(label, textarea, count);
+        form.appendChild(wrapper);
+
+        answers[key] = textarea;
+    }
+
+    HLL_STAFF_QUESTIONS.forEach((question, index) => {
+        makeField(
+            `question_${index + 1}`,
+            question,
+            index
+        );
+    });
+
+    const divider = hllAppElement("hr", "hll-app-divider");
+    form.appendChild(divider);
+
+    const discordWrapper = hllAppElement("div", "hll-app-field");
+
+    const discordLabel = document.createElement("label");
+    discordLabel.textContent =
+        "22. What is your Discord username?";
+
+    const discordInput = document.createElement("input");
+    discordInput.type = "text";
+    discordInput.name = "discord_username";
+    discordInput.required = true;
+    discordInput.maxLength = 80;
+    discordInput.minLength = 2;
+    discordInput.placeholder = "username";
+
+    discordInput.addEventListener("input", updateProgress);
+
+    discordWrapper.append(discordLabel, discordInput);
+    form.appendChild(discordWrapper);
+
+    const submit = hllAppElement(
+        "button",
+        "hll-app-button",
+        "Submit application"
+    );
+
+    submit.type = "submit";
+
+    const status = hllAppElement("div", "hll-app-status");
+    status.setAttribute("role", "status");
+
+    form.append(submit, status);
+    card.appendChild(form);
+    root.appendChild(card);
+
+    function updateProgress() {
+        let answered = 0;
+
+        Object.values(answers).forEach(input => {
+            if (input.value.trim().length >= 10) answered++;
+        });
+
+        if (discordInput.value.trim().length >= 2) answered++;
+
+        counter.textContent = `${answered} / 22 answered`;
+        progressBar.style.width = `${answered / 22 * 100}%`;
+    }
+
+    form.addEventListener("submit", async event => {
+        event.preventDefault();
+
+        if (!form.reportValidity()) return;
+
+        const answerData = {};
+
+        for (const [key, input] of Object.entries(answers)) {
+            const value = input.value.trim();
+
+            if (value.length < 10) {
+                status.textContent =
+                    "Please provide at least 10 characters for every answer.";
+                status.style.color = "#ff6b6b";
+                input.focus();
+                return;
+            }
+
+            answerData[key] = value;
+        }
+
+        const discord = discordInput.value.trim();
+
+        if (discord.length < 2) {
+            status.textContent = "Enter your Discord username.";
+            status.style.color = "#ff6b6b";
+            discordInput.focus();
+            return;
+        }
+
+        if (!confirm(
+            "Submit your HLL staff application?\n\n" +
+            "You cannot submit another application while this one is pending."
+        )) return;
+
+        submit.disabled = true;
+        submit.textContent = "Submitting...";
+        status.textContent = "";
+
+        try {
+            const { error: insertError } = await supabaseClient
+                .from("staff_applications")
+                .insert({
+                    applicant_id: currentUser.id,
+                    discord_username: discord,
+                    answers: answerData,
+                    status: "pending"
+                });
+
+            if (insertError) throw insertError;
+
+            status.style.color = "#42d392";
+            status.textContent =
+                "Your application has been submitted successfully.";
+
+            await setupHLLStaffApplication();
+
+        } catch (error) {
+            console.error("Application submission failed:", error);
+
+            status.style.color = "#ff6b6b";
+            status.textContent = getErrorMessage(error);
+
+            submit.disabled = false;
+            submit.textContent = "Submit application";
+        }
+    });
+}
+
+async function hllRenderOwnerApplications(root) {
+    const section = hllAppElement("section", "");
+    section.id = "hll-owner-review";
+
+    section.appendChild(
+        hllAppElement("h2", "", "Owner application review")
+    );
+
+    section.appendChild(
+        hllAppElement(
+            "p",
+            "hll-app-muted",
+            "Only the HLL owner can approve or reject applications."
+        )
+    );
+
+    const list = hllAppElement("div", "");
+    list.textContent = "Loading applications...";
+
+    section.appendChild(list);
+    root.appendChild(section);
+
+    const { data: applications, error } = await supabaseClient
+        .from("staff_applications")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    list.textContent = "";
+
+    if (!applications?.length) {
+        list.appendChild(
+            hllAppElement(
+                "p",
+                "hll-app-muted",
+                "There are no applications yet."
+            )
+        );
+        return;
+    }
+
+    const applicantIds = [
+        ...new Set(applications.map(app => app.applicant_id))
+    ];
+
+    const { data: profiles, error: profileError } = await supabaseClient
+        .from("profiles")
+        .select("id, username, gd_username")
+        .in("id", applicantIds);
+
+    if (profileError) throw profileError;
+
+    const profileMap = new Map(
+        (profiles || []).map(profile => [profile.id, profile])
+    );
+
+    applications.forEach(application => {
+        const profile = profileMap.get(application.applicant_id);
+        const card = hllAppElement("article", "hll-app-application");
+
+        card.append(
+            hllAppElement(
+                "span",
+                "hll-app-tag",
+                application.status.toUpperCase()
+            ),
+            hllAppElement(
+                "h3",
+                "",
+                profile?.username || "Unknown player"
+            ),
+            hllAppElement(
+                "p",
+                "hll-app-muted",
+                "Submitted: " + formatDate(application.created_at)
+            ),
+            hllAppElement(
+                "p",
+                "hll-app-muted",
+                "Discord: " + application.discord_username
+            ),
+            hllAppElement(
+                "p",
+                "hll-app-muted",
+                "Geometry Dash username: " +
+                (profile?.gd_username || "Not provided")
+            )
+        );
+
+        Object.entries(application.answers || {}).forEach(
+            ([key, answer]) => {
+                const wrapper = hllAppElement("div", "hll-app-answer");
+
+                const questionNumber = Number(
+                    key.replace("question_", "")
+                );
+
+                const question = HLL_STAFF_QUESTIONS[
+                    questionNumber - 1
+                ] || "Additional answer";
+
+                wrapper.append(
+                    hllAppElement("strong", "", question),
+                    hllAppElement("p", "", answer)
+                );
+
+                card.appendChild(wrapper);
+            }
+        );
+
+        if (application.status === "pending") {
+            const roleSelect = document.createElement("select");
+            roleSelect.className = "hll-app-role";
+
+            [
+                ["moderator", "Moderator"],
+                ["admin", "Admin"],
+                ["owner", "Owner"]
+            ].forEach(([value, label]) => {
+                const option = document.createElement("option");
+                option.value = value;
+                option.textContent = label;
+                roleSelect.appendChild(option);
+            });
+
+            const actions = hllAppElement("div", "hll-app-actions");
+
+            const approve = hllAppElement(
+                "button",
+                "hll-app-button",
+                "Approve"
+            );
+
+            approve.type = "button";
+
+            const reject = hllAppElement(
+                "button",
+                "hll-app-button danger",
+                "Reject"
+            );
+
+            reject.type = "button";
+
+            const status = hllAppElement("p", "hll-app-status");
+
+            async function review(decision) {
+                const selectedRole = roleSelect.value;
+
+                if (decision === "approved") {
+                    if (!confirm(
+                        `Approve ${profile?.username || "this applicant"} ` +
+                        `as ${selectedRole.toUpperCase()}?\n\n` +
+                        "This immediately grants the selected staff role."
+                    )) return;
+                } else {
+                    if (!confirm("Reject this staff application?")) return;
+                }
+
+                approve.disabled = true;
+                reject.disabled = true;
+
+                status.textContent = "Processing...";
+
+                try {
+                    const { error } = await supabaseClient.rpc(
+                        "hll_review_staff_application",
+                        {
+                            p_application_id: application.id,
+                            p_decision: decision,
+                            p_role: decision === "approved"
+                                ? selectedRole
+                                : null
+                        }
+                    );
+
+                    if (error) throw error;
+
+                    status.style.color = "#42d392";
+                    status.textContent =
+                        decision === "approved"
+                            ? `Approved as ${selectedRole}.`
+                            : "Application rejected.";
+
+                    await setupHLLStaffApplication();
+
+                } catch (error) {
+                    console.error("Application review failed:", error);
+
+                    status.style.color = "#ff6b6b";
+                    status.textContent = getErrorMessage(error);
+
+                    approve.disabled = false;
+                    reject.disabled = false;
+                }
+            }
+
+            approve.addEventListener("click", () => review("approved"));
+            reject.addEventListener("click", () => review("rejected"));
+
+            actions.append(approve, reject);
+
+            card.append(
+                roleSelect,
+                actions,
+                status
+            );
+        } else if (application.assigned_role) {
+            card.appendChild(
+                hllAppElement(
+                    "p",
+                    "hll-app-muted",
+                    "Assigned role: " + roleLabel(application.assigned_role)
+                )
+            );
+        }
+
+        list.appendChild(card);
+    });
+}
+
+/* ---------- APPLICATION PAGE INITIALIZATION ---------- */
+
+document.addEventListener("DOMContentLoaded", async () => {
+    if (pageName() !== "application.html") return;
+
+    try {
+        await initializeSupabase();
+        await loadCurrentUser();
+
+        await setupHLLStaffApplication();
+
+    } catch (error) {
+        console.error("HLL application startup failed:", error);
+
+        const root = $("hll-application-root");
+
+        if (root) {
+            root.textContent =
+                "Could not initialize applications: " +
+                getErrorMessage(error);
+        }
+    }
+});
+
+/* ---------- APPLICATION NAVIGATION LINK ---------- */
+
+document.addEventListener("DOMContentLoaded", () => {
+    if (document.querySelector('[data-hll-application-link]')) return;
+
+    const nav = document.querySelector(
+        ".nav-links, header nav, nav"
+    );
+
+    if (!nav) return;
+
+    const link = document.createElement("a");
+
+    link.href = "application.html";
+    link.textContent = "Staff Application";
+    link.dataset.hllApplicationLink = "true";
+
+    nav.appendChild(link);
+});
+
