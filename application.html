@@ -1,14 +1,161 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#0d0d0f">
+    <meta name="theme-color" content="#090a0d">
+
     <title>Staff Application | HLL</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: #090a0d;
+            color: #f4f4f5;
+            font-family: Arial, Helvetica, sans-serif;
+        }
+
+        #hll-application-root {
+            width: min(1000px, calc(100% - 32px));
+            margin: 55px auto;
+            color: #f4f4f5;
+        }
+
+        #hll-application-root h1 {
+            font-size: clamp(30px, 5vw, 44px);
+            font-weight: 800;
+            letter-spacing: -1.5px;
+            margin-bottom: 12px;
+        }
+
+        #hll-application-root h2 {
+            font-size: 23px;
+            margin: 28px 0 16px;
+        }
+
+        #hll-application-root h3 {
+            font-size: 18px;
+        }
+
+        #hll-application-root p {
+            color: #a1a1aa;
+            line-height: 1.7;
+        }
+
+        #hll-application-root form,
+        #hll-application-root section,
+        #hll-application-root article,
+        #hll-application-root [class*="card"],
+        #hll-application-root [class*="application"],
+        #hll-application-root [class*="review"] {
+            background: #111318;
+            border: 1px solid #292d37;
+            border-radius: 14px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+
+        #hll-application-root label {
+            display: block;
+            color: #e4e4e7;
+            font-size: 14px;
+            font-weight: 650;
+            margin: 18px 0 9px;
+        }
+
+        #hll-application-root input,
+        #hll-application-root textarea,
+        #hll-application-root select {
+            display: block;
+            width: 100%;
+            padding: 14px;
+            margin: 8px 0 20px;
+            background: #090b10;
+            color: #fff;
+            border: 1px solid #303541;
+            border-radius: 9px;
+            font: inherit;
+            outline: none;
+        }
+
+        #hll-application-root textarea {
+            min-height: 115px;
+            resize: vertical;
+        }
+
+        #hll-application-root input:focus,
+        #hll-application-root textarea:focus,
+        #hll-application-root select:focus {
+            border-color: #668fff;
+            box-shadow: 0 0 0 3px #668fff20;
+        }
+
+        #hll-application-root button {
+            padding: 12px 20px;
+            margin: 5px;
+            border: 1px solid #343b4a;
+            border-radius: 9px;
+            background: #202531;
+            color: white;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: .2s ease;
+        }
+
+        #hll-application-root button:hover {
+            filter: brightness(1.2);
+            transform: translateY(-1px);
+        }
+
+        #hll-application-root button[type="submit"] {
+            background: #426fe8;
+            border-color: #426fe8;
+        }
+
+        #hll-application-root a {
+            color: #82a5ff;
+        }
+
+        #hll-application-root [data-type="success"] {
+            color: #62dda1 !important;
+        }
+
+        #hll-application-root [data-type="error"] {
+            color: #ff777f !important;
+        }
+
+        #hll-application-root button:disabled {
+            opacity: .5;
+            cursor: not-allowed;
+        }
+
+        @media (max-width: 650px) {
+            #hll-application-root {
+                width: calc(100% - 22px);
+                margin: 28px auto;
+            }
+
+            #hll-application-root form,
+            #hll-application-root section,
+            #hll-application-root article {
+                padding: 17px;
+            }
+        }
+    </style>
 </head>
+
 <body>
+
     <main id="hll-application-root"></main>
 
     <script src="script.js"></script>
+
 </body>
 </html>
